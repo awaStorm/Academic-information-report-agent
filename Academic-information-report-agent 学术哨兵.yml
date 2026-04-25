@@ -1,0 +1,285 @@
+app:
+  description: 针对“学习通”及其衍生app如“学在西电”与校园公众号的信息采集代理。自动抓取并汇总竞赛报名、辩论选课及志愿招募等关键情报
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  icon_type: emoji
+  mode: workflow
+  name: Academic-information-report-agent 学术哨兵
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.6.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 20
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInLoop: false
+        sourceType: trigger-schedule
+        targetType: http-request
+      id: 1777115034193-source-1777122982289-target
+      selected: false
+      source: '1777115034193'
+      sourceHandle: source
+      target: '1777122982289'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: http-request
+        targetType: llm
+      id: 1777122982289-source-1777122997594-target
+      selected: false
+      source: '1777122982289'
+      sourceHandle: source
+      target: '1777122997594'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: if-else
+      id: 1777122997594-source-1777123085801-target
+      source: '1777122997594'
+      sourceHandle: source
+      target: '1777123085801'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: http-request
+      id: 1777123085801-false-1777123176177-target
+      source: '1777123085801'
+      sourceHandle: 'false'
+      target: '1777123176177'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        config:
+          frequency: daily
+          mode: visual
+          timezone: UTC
+          visual_config:
+            monthly_days:
+            - 1
+            on_minute: 0
+            time: 12:00 AM
+            weekdays:
+            - sun
+        cron_expression: ''
+        desc: 设置一个定时触发器节点，每天早上8点启动工作流。
+        frequency: daily
+        mode: visual
+        selected: false
+        title: 定时触发
+        type: trigger-schedule
+        visual_config:
+          monthly_days:
+          - 1
+          on_minute: 0
+          time: 12:00 AM
+          weekdays:
+          - sun
+      height: 173
+      id: '1777115034193'
+      position:
+        x: 183.56010552347198
+        y: 295.7960333954402
+      positionAbsolute:
+        x: 183.56010552347198
+        y: 295.7960333954402
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: []
+          type: none
+        desc: 使用HTTP请求节点，调用Jina Reader等工具抓取目标网页内容。
+        headers: ''
+        method: get
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: HTTP 请求——网页抓取
+        type: http-request
+        url: ''
+        variables: []
+      height: 124
+      id: '1777122982289'
+      position:
+        x: 488.3785235783122
+        y: 316.7960333954402
+      positionAbsolute:
+        x: 488.3785235783122
+        y: 316.7960333954402
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: 使用一个LLM节点，编写提示词，让它判断内容是否与“竞赛、讲座”相关。如果相关，则提取标题、截止日期等关键信息并以JSON格式输出。
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: ''
+          provider: ''
+        prompt_template:
+        - role: system
+          text: ''
+        selected: false
+        title: LLM——智能过滤
+        type: llm
+        vision:
+          enabled: false
+      height: 127
+      id: '1777122997594'
+      position:
+        x: 827.268404882324
+        y: 316.7960333954402
+      positionAbsolute:
+        x: 827.268404882324
+        y: 316.7960333954402
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions: []
+          id: 'true'
+          logical_operator: and
+        desc: 根据上一步的判断结果，如果是“IGNORE”则流程结束；如果是相关事件，则进入下一步。
+        selected: false
+        title: 条件分支
+        type: if-else
+      height: 159
+      id: '1777123085801'
+      position:
+        x: 1212.9002901128079
+        y: 316.7960333954402
+      positionAbsolute:
+        x: 1212.9002901128079
+        y: 316.7960333954402
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data: []
+          type: none
+        desc: 使用HTTP请求节点，调用飞书、钉钉或企业微信机器人的Webhook，将提取到的信息以格式化的方式推送给你。
+        headers: ''
+        method: get
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: HTTP 请求 ——通知推送
+        type: http-request
+        url: ''
+        variables: []
+      height: 140
+      id: '1777123176177'
+      position:
+        x: 1608.481328583532
+        y: 433.47001071510294
+      positionAbsolute:
+        x: 1608.481328583532
+        y: 433.47001071510294
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    viewport:
+      x: -100.75077326136761
+      y: 51.346183553620605
+      zoom: 0.8705505632961227
+  rag_pipeline_variables: []
