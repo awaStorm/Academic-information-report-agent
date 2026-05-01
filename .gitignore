@@ -2,6 +2,9 @@
 __pycache__/
 *.py[codz]
 *$py.class
+data/*.db
+data/*.json
+reports/*.md
 
 # C extensions
 *.so
