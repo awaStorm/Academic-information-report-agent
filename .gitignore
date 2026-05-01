@@ -208,3 +208,15 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# 项目凭证文件
+configs/
+
+# 数据文件
+data/
+
+# 生成的报告
+reports/
+
+# IDE 配置文件
+.idea/
