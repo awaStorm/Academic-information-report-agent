@@ -209,14 +209,33 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# 项目凭证文件
+# 项目凭证文件（包含敏感Cookie和Token）
 configs/
 
-# 数据文件
+# 数据文件（包含原始数据、处理后数据和数据库）
 data/
+data/memory.db
+data/raw/
+data/processed/
 
 # 生成的报告
 reports/
 
 # IDE 配置文件
 .idea/
+
+# macOS 系统文件
+.DS_Store
+
+# 临时文件
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Playwright 浏览器缓存
+.playwright/
+
+# Chromium 下载缓存
+.playwright/.local-browsers/

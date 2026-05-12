@@ -5,6 +5,8 @@ import time
 import sys
 import io
 
+from src.utils.config_loader import CONFIG
+
 class WechatScraper:
     """统一爬虫管理类"""
     # 计算项目根目录的路径 (src/collectors/scrapers 是三级目录，所以跳三级)
@@ -14,9 +16,8 @@ class WechatScraper:
     AUTH_PATH = os.path.join(base_dir, "configs", "wechat_auth.json")
     OUTPUT_FILE = os.path.join(base_dir, "data", "raw", "data_raw_wechat.json")
     
-    def __init__(self):
-        # Removed sys.stdout redirection for Windows compatibility
-        pass
+    def __init__(self, extra_query=None):
+        self.extra_query = extra_query
     
     def load_auth(self):
         if not os.path.exists(self.AUTH_PATH):
@@ -106,12 +107,16 @@ class WechatScraper:
         auth = self.load_auth()
         if not auth: return
     
-        # 你可以随时在这里增删关注名单
-        my_follow_list = [
-            "西小电星球", 
-            "西电社团", 
-            "西电体育"
-        ]
+        # 从配置读取关注列表
+        my_follow_list = CONFIG.get("collectors", {}).get("wechat", {}).get("targets", [
+            "西小电星球",
+            "西电社团",
+            "西电体育",
+        ])
+
+        # 如果有额外查询目标，追加到列表
+        if self.extra_query and self.extra_query not in my_follow_list:
+            my_follow_list.append(self.extra_query)
     
         all_results = []
         print(f"🔔 开始批量巡检，目标公众号数量: {len(my_follow_list)}")
@@ -135,11 +140,13 @@ class WechatScraper:
         if all_results:
             print(f"📂 数据已存入: {self.OUTPUT_FILE}")
 
-def run_wechat_scraper_flow():
+def run_wechat_scraper_flow(extra_query=None, progress_callback=None):
     """
     供外部接口（如 main.py）直接调用的包装函数
+    extra_query: 可选，额外抓取的公众号名称
+    progress_callback: 可选，进度回调函数
     """
-    scraper = WechatScraper()
+    scraper = WechatScraper(extra_query=extra_query)
     return scraper.run_scraper_flow()
 
 if __name__ == "__main__":

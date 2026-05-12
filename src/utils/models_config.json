@@ -1,0 +1,13 @@
+{
+  "available_models": [
+    {"id": "qwen/qwen3-coder-480b-a35b-instruct", "name": "Qwen3-Coder (推荐)"},
+    {"id": "qwen/qwen2.5-72b-instruct", "name": "Qwen2.5-72B"},
+    {"id": "qwen/qwen2.5-coder-32b-instruct", "name": "Qwen2.5-Coder-32B"},
+    {"id": "deepseek-chat", "name": "DeepSeek Chat"},
+    {"id": "deepseek-coder", "name": "DeepSeek Coder"},
+    {"id": "gpt-4o", "name": "GPT-4o"},
+    {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+    {"id": "claude-3-5-sonnet", "name": "Claude 3.5 Sonnet"},
+    {"id": "claude-3-haiku", "name": "Claude 3 Haiku"}
+  ]
+}
