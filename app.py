@@ -18,6 +18,7 @@ import json
 import yaml
 import shutil
 import threading
+import queue as _queue_mod
 import gradio as gr
 from PIL import Image
 from datetime import datetime, timedelta
@@ -122,11 +123,6 @@ CUSTOM_CSS = """
 .gr-markdown h3 .icon {
     vertical-align: -3px;
     margin-right: 6px;
-}
-/* 聊天气泡内图标对齐 */
-.gr-chatbot .message .icon {
-    vertical-align: -2px;
-    margin-right: 3px;
 }
 /* details summary 内图标对齐 */
 details summary .icon {
@@ -324,31 +320,71 @@ input::placeholder, textarea::placeholder { color: #52525b !important; }
     border-color: rgba(255,255,255,0.1);
 }
 
-/* ===== 聊天界面优化 ===== */
-.gr-chatbot {
-    background: rgba(255,255,255,0.015) !important;
-    border: 1px solid rgba(255,255,255,0.06) !important;
-    border-radius: 14px !important;
+/* ===== 终端风格 Agent 输出 ===== */
+.agent-terminal {
+    background: #0c0c14 !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    border-radius: 12px !important;
+    font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas", monospace !important;
+    font-size: 13px !important;
+    line-height: 1.6 !important;
+    color: #c9d1d9 !important;
+    padding: 16px !important;
+    overflow-y: auto !important;
+    min-height: 420px !important;
+    max-height: 560px !important;
+    word-wrap: break-word !important;
+    white-space: pre-wrap !important;
 }
-.gr-chatbot .message.user {
-    background: rgba(139,92,246,0.08) !important;
-    border: 1px solid rgba(139,92,246,0.15) !important;
-    border-radius: 12px 12px 2px 12px !important;
+.agent-terminal .log-line { margin: 1px 0; }
+.agent-terminal .log-user {
+    color: #a78bfa !important;
+    font-weight: 600 !important;
 }
-.gr-chatbot .message.bot {
-    background: rgba(255,255,255,0.03) !important;
-    border: 1px solid rgba(255,255,255,0.06) !important;
-    border-radius: 12px 12px 12px 2px !important;
+.agent-terminal .log-agent {
+    color: #58a6ff !important;
+    font-weight: 600 !important;
 }
-/* 圆形头像预览 (GitHub 风格) */
-.avatar-upload img {
-    border-radius: 50% !important;
-    object-fit: cover !important;
+.agent-terminal .log-status {
+    color: #8b949e !important;
 }
-.avatar-upload .image-container {
-    border-radius: 50% !important;
-    border: 2px solid rgba(255,255,255,0.1) !important;
-    overflow: hidden !important;
+.agent-terminal .log-ok {
+    color: #3fb950 !important;
+}
+.agent-terminal .log-err {
+    color: #f85149 !important;
+}
+.agent-terminal .log-warn {
+    color: #d29922 !important;
+}
+.agent-terminal .log-tool {
+    color: #79c0ff !important;
+}
+.agent-terminal .log-divider {
+    color: #30363d !important;
+    margin: 6px 0;
+}
+.agent-terminal .cursor-blink {
+    display: inline-block;
+    width: 8px;
+    height: 15px;
+    background: #58a6ff;
+    vertical-align: text-bottom;
+    animation: blink 1s step-end infinite;
+    margin-left: 2px;
+}
+@keyframes blink {
+    50% { opacity: 0; }
+}
+.agent-terminal .typing-dots::after {
+    content: '...';
+    animation: dots 1.5s steps(4, end) infinite;
+}
+@keyframes dots {
+    0%  { content: ''; }
+    25% { content: '.'; }
+    50% { content: '..'; }
+    75% { content: '...'; }
 }
 
 /* 报告查看器 — 全宽展开 */
@@ -665,7 +701,7 @@ def _save_avatar(src_path: str, role: str):
     return dst
 
 def apply_avatar(user_img, bot_img):
-    """应用头像：保存图片 + 更新 chatbot"""
+    """应用头像：保存图片"""
     msgs = []
     user_avatar = _avatar_path("user")
     bot_avatar = _avatar_path("bot")
@@ -836,7 +872,10 @@ def test_wecom_push():
             "link": ""
         }]
         result = pusher.send_wecom(test_items, datetime.now().strftime("%Y-%m-%d"))
-        return result.get("message", str(result))
+        if result:
+            return "企业微信推送测试成功！请检查群消息。"
+        else:
+            return "企业微信推送失败，请检查 Webhook 地址是否正确。"
     except Exception as e:
         return f"测试失败: {str(e)}"
 
@@ -849,7 +888,10 @@ def test_serverchan_push():
             "brief": "如果你看到这条消息，说明 Server 酱配置成功！"
         }]
         result = pusher.send_serverchan(test_items, datetime.now().strftime("%Y-%m-%d"))
-        return result.get("message", str(result))
+        if result:
+            return "Server酱推送测试成功！请检查微信消息。"
+        else:
+            return "Server酱推送失败，请检查 SendKey 是否正确。"
     except Exception as e:
         return f"测试失败: {str(e)}"
 
@@ -995,42 +1037,53 @@ def _get_agent() -> XidianAgent:
 def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
-def agent_chat_respond(user_message: str, chat_history: list):
-    if not user_message.strip():
-        yield chat_history
-        return
+def _html_escape(text: str) -> str:
+    """转义 HTML 特殊字符"""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+def _term_line(cls: str, text: str) -> str:
+    """生成终端单行 HTML"""
+    return f'<div class="log-line log-{cls}">{text}</div>'
+
+def _render_terminal(log_entries: list, is_running: bool = False) -> str:
+    """将日志条目列表渲染为终端 HTML"""
+    lines = []
+    for entry in log_entries:
+        lines.append(_term_line(entry["cls"], entry["html"]))
+    if is_running:
+        lines.append('<div class="log-line"><span class="cursor-blink"></span></div>')
+    body = "\n".join(lines)
+    # JS: 每次 HTML 更新后自动滚到底部
+    return f'''<div class="agent-terminal" id="agent-terminal">{body}</div>
+<script>
+(function() {{
+    var el = document.getElementById('agent-terminal');
+    if (el) el.scrollTop = el.scrollHeight;
+}})();
+</script>'''
+
+
+# ========== Agent 聊天后端：线程 + 队列 实时流 ==========
+
+_agent_chat_lock = threading.Lock()
+
+def _agent_worker(user_message: str, log_q: _queue_mod.Queue):
+    """后台线程：执行 Agent 逻辑，通过队列推送日志"""
     agent = _get_agent()
-    chat_history = chat_history + [{"role": "user", "content": user_message}]
 
     original_console = CONFIG['pusher']['enable_console_report']
     CONFIG['pusher']['enable_console_report'] = False
-    original_stdout = sys.stdout
-    captured_logs = []
-
-    class ChatCapture(io.StringIO):
-        def write(self, text):
-            if text and text.strip():
-                captured_logs.append(text.rstrip())
-            return super().write(text)
-
-    capture = ChatCapture()
 
     try:
-        sys.stdout = capture
         current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         timed_input = f"【当前系统时间：{current_time_str}】\n用户指令：{user_message}"
         agent.history.append({"role": "user", "content": timed_input})
 
-        status_lines = []
-        all_responses = []
-
-        status_lines.append(f"{ICONS['loader']} [{_ts()}] 收到指令，正在思考...")
-        current_status = "\n".join(status_lines)
-        chat_history_with_status = chat_history + [{"role": "assistant", "content": current_status}]
-        yield chat_history_with_status
+        log_q.put({"cls": "status", "html": f"🔄 [{_ts()}] 收到指令，正在思考..."})
 
         while True:
+            log_q.put({"cls": "status", "html": f"⏳ [{_ts()}] 等待 LLM 响应..."})
+
             response = agent.client.chat.completions.create(
                 model=agent.model,
                 messages=agent.history,
@@ -1044,7 +1097,14 @@ def agent_chat_respond(user_message: str, chat_history: list):
             agent.history.append(response_msg)
 
             if response_msg.content:
-                all_responses.append(response_msg.content)
+                # 实时显示 Agent 的文字回复
+                log_q.put({"cls": "divider", "html": "─" * 40})
+                for line in response_msg.content.split("\n"):
+                    if line.strip():
+                        log_q.put({"cls": "agent", "html": f"🤖 {_html_escape(line)}"})
+                    else:
+                        log_q.put({"cls": "agent", "html": "&nbsp;"})
+                log_q.put({"cls": "divider", "html": "─" * 40})
 
             if not response_msg.tool_calls:
                 break
@@ -1055,49 +1115,43 @@ def agent_chat_respond(user_message: str, chat_history: list):
                 args = json.loads(args_str) if args_str else {}
 
                 tool_display = _friendly_tool_name(function_name)
-                status_lines.append(f"{ICONS['wrench']} [{_ts()}] 调用工具: **{tool_display}**")
-                current_status = "\n".join(status_lines)
-                chat_history_with_status = chat_history + [{"role": "assistant", "content": current_status}]
-                yield chat_history_with_status
+                log_q.put({"cls": "tool", "html": f"🔧 [{_ts()}] 调用工具: {tool_display}"})
 
+                # 进度回调 — 直接推到日志队列
                 progress_lines_ref = [0]
 
-                def _make_scraper_callback():
+                def _make_scraper_callback(q):
                     def callback(idx, total, name, new_count):
-                        if progress_lines_ref[0] > 0:
-                            status_lines.pop()
-                        status_lines.append(
-                            f"{ICONS['radio']} [{_ts()}] 抓取公众号 ({idx}/{total}): {name}... {ICONS['check']} 累计新增 {new_count} 条"
-                        )
-                        progress_lines_ref[0] += 1
+                        msg = f"📡 [{_ts()}] 抓取公众号 ({idx}/{total}): {name}... ✅ 累计新增 {new_count} 条"
+                        q.put({"cls": "ok", "html": msg, "_replace_last_progress": True})
                     return callback
 
-                def _make_parser_callback():
+                def _make_parser_callback(q):
                     def callback(idx, total, title):
-                        if progress_lines_ref[0] > 0:
-                            status_lines.pop()
                         short_title = title[:20] + "..." if len(title) > 20 else title
-                        status_lines.append(
-                            f"{ICONS['file-text']} [{_ts()}] 解析文章 ({idx}/{total}): {short_title}"
-                        )
-                        progress_lines_ref[0] += 1
+                        msg = f"📄 [{_ts()}] 解析文章 ({idx}/{total}): {short_title}"
+                        q.put({"cls": "tool", "html": msg, "_replace_last_progress": True})
                     return callback
 
                 if function_name == "run_wechat_scraper":
-                    args["progress_callback"] = _make_scraper_callback()
+                    args["progress_callback"] = _make_scraper_callback(log_q)
                 elif function_name == "parse_wechat_content":
-                    args["progress_callback"] = _make_parser_callback()
+                    args["progress_callback"] = _make_parser_callback(log_q)
 
                 result = execute_tool(function_name, **args)
 
-                success = result.get("success", False) if isinstance(result, dict) else True
-                result_icon = f"{ICONS['check']}" if success else f"{ICONS['x-circle']}"
+                # 判定逻辑：dict 取 success 字段；None 表示无返回值（执行完毕无异常=成功）；其他类型按真值
+                if isinstance(result, dict):
+                    success = result.get("success", False)
+                elif result is None:
+                    success = True  # 工具函数执行完毕未抛异常，即视为成功
+                else:
+                    success = bool(result)
                 result_summary = _summarize_tool_result(function_name, result)
-                status_lines.append(f"{result_icon} [{_ts()}] {tool_display} → {result_summary}")
-
-                current_status = "\n".join(status_lines)
-                chat_history_with_status = chat_history + [{"role": "assistant", "content": current_status}]
-                yield chat_history_with_status
+                if success:
+                    log_q.put({"cls": "ok", "html": f"✅ [{_ts()}] {tool_display} → {result_summary}"})
+                else:
+                    log_q.put({"cls": "err", "html": f"❌ [{_ts()}] {tool_display} → {result_summary}"})
 
                 agent.history.append({
                     "tool_call_id": tool_call.id,
@@ -1106,34 +1160,94 @@ def agent_chat_respond(user_message: str, chat_history: list):
                     "content": json.dumps(result, ensure_ascii=False)
                 })
 
-        reply_parts = []
-        if all_responses:
-            main_reply = "\n".join(all_responses)
-            reply_parts.append(main_reply)
-
-        if captured_logs:
-            log_block = "\n".join(f"- {l}" for l in captured_logs)
-            reply_parts.append(
-                f"\n\n<details><summary>{ICONS['scroll']} 工具调用日志（{len(captured_logs)} 条）</summary>\n\n{log_block}\n\n</details>"
-            )
-
-        status_lines.append(f"{ICONS['sparkles']} [{_ts()}] 全部完成！")
-        final_status = "\n".join(status_lines)
-        final_reply = final_status + "\n\n---\n\n" + ("\n".join(reply_parts) if reply_parts else "（Agent 无文字回复）")
+        log_q.put({"cls": "ok", "html": f"✨ [{_ts()}] 全部完成！"})
 
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
-        status_lines.append(f"{ICONS['x-circle']} [{_ts()}] 执行异常: `{type(e).__name__}: {e}`")
-        final_status = "\n".join(status_lines)
-        final_reply = f"{final_status}\n\n---\n\n**Agent 执行异常**: `{type(e).__name__}: {e}`\n\n请检查 LLM API Key 和网络连接。\n\n```\n{tb[-300:]}\n```"
+        log_q.put({"cls": "err", "html": f"💥 [{_ts()}] 执行异常: {type(e).__name__}: {e}"})
+        log_q.put({"cls": "err", "html": f"<pre style='color:#f85149;font-size:11px'>{_html_escape(tb[-500:])}</pre>"})
 
     finally:
         CONFIG['pusher']['enable_console_report'] = original_console
-        sys.stdout = original_stdout
+        log_q.put(None)  # 哨兵：标记结束
 
-    chat_history = chat_history + [{"role": "assistant", "content": final_reply}]
-    yield chat_history
+
+def agent_chat_respond(user_message: str, log_entries_state: list):
+    """Gradio 入口：启动后台线程 + 轮询队列，实时渲染终端 HTML"""
+    if not user_message.strip():
+        yield _render_terminal(log_entries_state, is_running=False), log_entries_state
+        return
+
+    # 追加用户消息
+    log_entries_state.append({"cls": "user", "html": f"👤 [{_ts()}] {_html_escape(user_message)}"})
+
+    log_q = _queue_mod.Queue()
+
+    # 启动后台线程
+    t = threading.Thread(target=_agent_worker, args=(user_message, log_q), daemon=True)
+    t.start()
+
+    # 轮询队列，实时渲染
+    idle_count = 0
+    while True:
+        try:
+            item = log_q.get(timeout=0.05)
+            idle_count = 0
+        except _queue_mod.Empty:
+            idle_count += 1
+            # 没有新消息，每 10 次空轮询（~0.5s）才 yield 一次光标闪烁
+            if idle_count % 10 == 1:
+                yield _render_terminal(log_entries_state, is_running=True), log_entries_state
+            continue
+
+        if item is None:
+            # 线程结束
+            break
+
+        # 处理进度替换逻辑
+        if item.get("_replace_last_progress"):
+            # 从末尾找最近一条进度行替换
+            for i in range(len(log_entries_state) - 1, -1, -1):
+                if log_entries_state[i].get("_is_progress"):
+                    log_entries_state[i] = {"cls": item["cls"], "html": item["html"], "_is_progress": True}
+                    break
+            else:
+                log_entries_state.append({"cls": item["cls"], "html": item["html"], "_is_progress": True})
+        else:
+            # 标记进度行（scraper/parser 回调产生的行）
+            is_progress = item["cls"] in ("ok", "tool") and any(
+                kw in item["html"] for kw in ("抓取公众号", "解析文章")
+            )
+            log_entries_state.append({"cls": item["cls"], "html": item["html"], "_is_progress": is_progress})
+
+        # 批量消费队列中已有的消息，减少 yield 次数
+        while not log_q.empty():
+            try:
+                extra = log_q.get_nowait()
+            except _queue_mod.Empty:
+                break
+            if extra is None:
+                # 提前收到哨兵
+                yield _render_terminal(log_entries_state, is_running=False), log_entries_state
+                return
+            if extra.get("_replace_last_progress"):
+                for i in range(len(log_entries_state) - 1, -1, -1):
+                    if log_entries_state[i].get("_is_progress"):
+                        log_entries_state[i] = {"cls": extra["cls"], "html": extra["html"], "_is_progress": True}
+                        break
+                else:
+                    log_entries_state.append({"cls": extra["cls"], "html": extra["html"], "_is_progress": True})
+            else:
+                is_progress = extra["cls"] in ("ok", "tool") and any(
+                    kw in extra["html"] for kw in ("抓取公众号", "解析文章")
+                )
+                log_entries_state.append({"cls": extra["cls"], "html": extra["html"], "_is_progress": is_progress})
+
+        yield _render_terminal(log_entries_state, is_running=True), log_entries_state
+
+    # 最终渲染（无光标）
+    yield _render_terminal(log_entries_state, is_running=False), log_entries_state
 
 
 def _friendly_tool_name(name: str) -> str:
@@ -1153,8 +1267,14 @@ def _friendly_tool_name(name: str) -> str:
     return name_map.get(name, name)
 
 def _summarize_tool_result(name: str, result) -> str:
+    # 处理 None / bool / 非dict 返回值
+    if result is None:
+        return "执行完毕"
+    if isinstance(result, bool):
+        return "成功" if result else "失败"
     if not isinstance(result, dict):
-        return str(result)[:80]
+        text = str(result)
+        return text[:60] if text and text != "None" else "完成"
     success = result.get("success", False)
     if not success:
         error_type = result.get("error_type", "UNKNOWN")
@@ -1200,7 +1320,7 @@ def _summarize_tool_result(name: str, result) -> str:
 def reset_agent_chat():
     global _agent_instance
     _agent_instance = None
-    return [], "**Agent 会话已重置**"
+    return _render_terminal([], is_running=False), []
 
 # --- 报告查看相关 ---
 
@@ -1620,44 +1740,16 @@ def build_ui():
 
             # ==================== Tab 5: Agent 对话 ====================
             with gr.TabItem("Agent 对话"):
-                gr.Markdown(
-                    "### 智能对话助手"
-                )
-                gr.Markdown(
-                    "与 AI Agent 对话，自主执行采集、分析、推送等操作。支持自然语言指令。"
-                )
+                gr.Markdown("### 智能对话助手")
+                gr.Markdown("与 AI Agent 对话，自主执行采集、分析、推送等操作。终端风格实时输出。")
 
-                # 加载已保存的头像
-                _saved_user = _avatar_path("user")
-                _saved_bot = _avatar_path("bot")
-                chatbot = gr.Chatbot(
-                    label="对话",
-                    height=520,
-                    show_label=False,
-                    avatar_images=(_saved_user, _saved_bot or "🤖"),
+                # 终端输出区
+                terminal_output = gr.HTML(
+                    value=_render_terminal([], is_running=False),
+                    label="终端输出",
                 )
-
-                # 头像上传区 (GitHub 风格)
-                with gr.Accordion("自定义头像", open=False):
-                    with gr.Row(equal_height=True):
-                        with gr.Column(scale=1, min_width=160):
-                            user_avatar_input = gr.Image(
-                                label="用户头像", type="filepath",
-                                height=140, width=140, sources=["upload"],
-                                elem_classes=["avatar-upload"],
-                            )
-                            gr.HTML("<div style='text-align:center;font-size:12px;color:#8b949e'>点击上传用户头像</div>")
-                        with gr.Column(scale=1, min_width=160):
-                            bot_avatar_input = gr.Image(
-                                label="Bot 头像", type="filepath",
-                                height=140, width=140, sources=["upload"],
-                                elem_classes=["avatar-upload"],
-                            )
-                            gr.HTML("<div style='text-align:center;font-size:12px;color:#8b949e'>点击上传 Bot 头像</div>")
-                    with gr.Row():
-                        avatar_apply_btn = gr.Button("保存", variant="primary", size="sm")
-                        avatar_reset_btn = gr.Button("重置", size="sm")
-                    avatar_status = gr.Textbox(show_label=False, interactive=False, container=False)
+                # 隐藏状态：保存日志条目
+                log_entries_state = gr.State([])
 
                 with gr.Row():
                     chat_input = gr.Textbox(
@@ -1669,13 +1761,11 @@ def build_ui():
                     chat_send_btn = gr.Button("发送", variant="primary", scale=1)
                     chat_reset_btn = gr.Button("重置", scale=1)
 
-                agent_status = gr.Markdown("", visible=True)
-
-                # 发送消息：chatbot 更新 + 清空输入框
+                # 发送消息
                 chat_input.submit(
                     agent_chat_respond,
-                    inputs=[chat_input, chatbot],
-                    outputs=[chatbot],
+                    inputs=[chat_input, log_entries_state],
+                    outputs=[terminal_output, log_entries_state],
                 ).then(
                     lambda: gr.update(value=""),
                     outputs=[chat_input],
@@ -1683,8 +1773,8 @@ def build_ui():
 
                 chat_send_btn.click(
                     agent_chat_respond,
-                    inputs=[chat_input, chatbot],
-                    outputs=[chatbot],
+                    inputs=[chat_input, log_entries_state],
+                    outputs=[terminal_output, log_entries_state],
                 ).then(
                     lambda: gr.update(value=""),
                     outputs=[chat_input],
@@ -1692,18 +1782,7 @@ def build_ui():
 
                 chat_reset_btn.click(
                     reset_agent_chat,
-                    outputs=[chatbot, agent_status],
-                )
-
-                # 头像事件绑定
-                avatar_apply_btn.click(
-                    apply_avatar,
-                    inputs=[user_avatar_input, bot_avatar_input],
-                    outputs=[chatbot, user_avatar_input, bot_avatar_input, avatar_status],
-                )
-                avatar_reset_btn.click(
-                    clear_avatar,
-                    outputs=[chatbot, user_avatar_input, bot_avatar_input, avatar_status],
+                    outputs=[terminal_output, log_entries_state],
                 )
 
         # 页脚

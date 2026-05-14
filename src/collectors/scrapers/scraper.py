@@ -48,7 +48,7 @@ class Scraper:
         os.makedirs(os.path.dirname(self.OUTPUT_FILE), exist_ok=True)
         cookies = self.load_cookies_from_json(self.COOKIE_PATH)
         if not cookies:
-            return
+            return {"success": False, "error_type": "AUTH", "message": "找不到超星凭证文件"}
 
         print("🚀 正在发起请求并准备保存原始响应...")
 
@@ -73,13 +73,17 @@ class Scraper:
                     print(f"📊 成功捕获 {len(notices_list)} 条通知数据。")
                     unread_count = sum(1 for item in notices_list if item.get('isread') == 0)
                     print(f"🔔 其中未读消息数量: {unread_count}")
+                    return {"success": True, "count": len(notices_list), "unread": unread_count}
                 else:
                     print("ℹ️ 服务器返回成功，但目前通知列表为空。")
+                    return {"success": True, "count": 0}
             else:
                 print(f"❌ 请求失败，HTTP 状态码: {resp.status_code}")
+                return {"success": False, "error_type": "HTTP", "message": f"状态码 {resp.status_code}"}
 
         except Exception as e:
             print(f"💥 运行异常: {str(e)}")
+            return {"success": False, "error_type": "EXCEPTION", "message": str(e)}
 
 def run_scraper_flow():
     """供 main.py 调用的入口函数"""

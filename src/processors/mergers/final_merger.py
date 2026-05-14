@@ -40,7 +40,7 @@ class FinalMerger:
         
         if not all_news:
             print("❌ 无可用情报，请检查前置采集脚本。")
-            return
+            return {"success": False, "error_type": "NO_DATA", "message": "无可用情报"}
         
         # 3. 全局时间排序
         all_news.sort(key=lambda x: x.get("date", ""), reverse=True)
@@ -52,6 +52,7 @@ class FinalMerger:
         print(f"\n✨ 大合流完成！")
         print(f"📊 总情报量: {len(all_news)} 条")
         print(f"📂 汇总文件: {self.FINAL_OUT}")
+        return {"success": True, "count": len(all_news)}
 
 if __name__ == "__main__":
     merger = FinalMerger()

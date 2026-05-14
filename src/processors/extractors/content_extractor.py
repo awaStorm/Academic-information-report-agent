@@ -18,7 +18,7 @@ class ContentExtractor:
         """精炼数据字段并清洗内容"""
         if not os.path.exists(self.INPUT_FILE):
             print(f"❌ 未找到输入文件: {self.INPUT_FILE}")
-            return
+            return {"success": False, "error_type": "NO_DATA", "message": f"找不到 {self.INPUT_FILE}"}
         
         with open(self.INPUT_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -57,6 +57,7 @@ class ContentExtractor:
         print(f"✨ 精炼完成！")
         print(f"📂 已生成 AI 就绪文件: {self.OUTPUT_FILE}")
         print(f"📝 原始字段已优化：content -> body, content_id -> id")
+        return {"success": True, "count": len(refined_data)}
     
 if __name__ == "__main__":
     # 实例化处理器并执行

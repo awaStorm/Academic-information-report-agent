@@ -47,7 +47,7 @@ class WechatParser:
     def run_parser(self):
         if not os.path.exists(self.INPUT_FILE):
             print(f"❌ 找不到输入文件: {self.INPUT_FILE}")
-            return
+            return {"success": False, "error_type": "NO_DATA", "message": f"找不到 {self.INPUT_FILE}"}
         
         with open(self.INPUT_FILE, "r", encoding="utf-8") as f:
             raw_articles = json.load(f)
@@ -90,6 +90,7 @@ class WechatParser:
             json.dump(refined_data, f, ensure_ascii=False, indent=4)
         
         print(f"\n✨ 解析完成！已就绪数据存入: {self.OUTPUT_FILE}")
+        return {"success": True, "count": len(refined_data)}
     
 if __name__ == "__main__":
     # 实例化解析器并执行

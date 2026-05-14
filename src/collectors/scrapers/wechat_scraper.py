@@ -105,7 +105,8 @@ class WechatScraper:
     def run_scraper_flow(self):
         os.makedirs(os.path.dirname(self.OUTPUT_FILE), exist_ok=True)
         auth = self.load_auth()
-        if not auth: return
+        if not auth:
+            return {"success": False, "error_type": "AUTH", "message": "找不到微信凭证"}
     
         # 从配置读取关注列表
         my_follow_list = CONFIG.get("collectors", {}).get("wechat", {}).get("targets", [
@@ -127,7 +128,7 @@ class WechatScraper:
             if articles:
                 print(f"📥 成功获取 {len(articles)} 篇文章")
                 all_results.extend(articles)
-            
+        
             # 公众号切换之间的长间隔
             print("正在切换下一个目标...")
             time.sleep(8)
@@ -139,6 +140,7 @@ class WechatScraper:
         print(f"\n✨ 批量任务完成！共收集 {len(all_results)} 条情报。")
         if all_results:
             print(f"📂 数据已存入: {self.OUTPUT_FILE}")
+        return {"success": True, "count": len(all_results)}
 
 def run_wechat_scraper_flow(extra_query=None, progress_callback=None):
     """

@@ -51,7 +51,7 @@ class DataProcessor:
         
         if not os.path.exists(self.RAW_CHAOXING):
             print(f"❌ 错误：找不到文件 {self.RAW_CHAOXING}")
-            return
+            return {"success": False, "error_type": "NO_DATA", "message": f"找不到 {self.RAW_CHAOXING}"}
         
         with open(self.RAW_CHAOXING, "r", encoding="utf-8") as f:
             raw_data = json.load(f)
@@ -74,6 +74,7 @@ class DataProcessor:
                 print(f"   - [{u['date']}] {u['title']} (来自: {u['origin_name']})")
         else:
             print("✅ 暂时没有未读的新情报。")
+        return {"success": True, "count": len(refined_data), "unread": len(unread_items)}
 
 if __name__ == "__main__":
     processor = DataProcessor()

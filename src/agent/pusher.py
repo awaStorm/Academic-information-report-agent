@@ -24,13 +24,15 @@ class Pusher:
         md_text = f"# 📅 西电情报核心提醒 | {date_str}\n"
         for item in pushed_items:
             d = item.get('deadline')
-            deadline = f"⏰截止 {d}" if d else "📅常规动态"
-            link = f" [🔗详情]({item.get('link')})" if item.get('link') else ""
+            deadline = f"⏰ {d}" if d else ""
+            raw_link = item.get('link', '')
+            link = f" [🔗详情]({raw_link})" if (raw_link and str(raw_link).startswith('http')) else ""
             category = item.get('category', '校园动态')
             
             md_text += f"### {item.get('title')}\n"
             md_text += f"> **来源**: {item.get('source')} | **分类**: {category}\n"
-            md_text += f"> **时间**: {deadline}\n"
+            if deadline:
+                md_text += f"> **时间**: {deadline}\n"
             md_text += f"> **干货**: {item.get('brief')}{link}\n\n"
         
         # 2. 发送请求
