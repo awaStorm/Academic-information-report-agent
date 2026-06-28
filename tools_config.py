@@ -177,15 +177,15 @@ TOOLS_METADATA = [
 TOOL_MAP = {
     "harvest_chaoxing_session": lambda: SessionHarvester().run_harvest(),
     "harvest_wechat_session": lambda: WechatHarvester().run_harvest(),
-    "run_chaoxing_scraper": lambda: Scraper().fetch_and_save(),
+    "run_chaoxing_scraper": lambda progress_callback=None: Scraper().fetch_and_save(progress_callback=progress_callback),
     "run_wechat_scraper": lambda extra_query=None, progress_callback=None: run_wechat_scraper_flow(extra_query=extra_query, progress_callback=progress_callback),
-    "process_raw_data": lambda: DataProcessor().run(),
-    "refine_data_for_ai": lambda: ContentExtractor().clean_and_refine(),
-    "parse_wechat_content": lambda progress_callback=None: WechatParser().run_parser(),
-    "merge_all_intelligence": lambda: FinalMerger().merge_intelligence(),
+    "process_raw_data": lambda progress_callback=None: DataProcessor().run(progress_callback=progress_callback),
+    "refine_data_for_ai": lambda progress_callback=None: ContentExtractor().clean_and_refine(progress_callback=progress_callback),
+    "parse_wechat_content": lambda progress_callback=None: WechatParser().run_parser(progress_callback=progress_callback),
+    "merge_all_intelligence": lambda progress_callback=None: FinalMerger().merge_intelligence(progress_callback=progress_callback),
     "check_intelligence_memory": lambda title, content, platform: _check_and_save(title, content, platform),
     "send_final_report": lambda pushed_items, date_str=None: _push_notification(pushed_items, date_str),
-    "analyze_and_push_intelligence": lambda: run_analysis_flow(),
+    "analyze_and_push_intelligence": lambda progress_callback=None: run_analysis_flow(progress_callback=progress_callback),
 }
 
 def _check_and_save(title, content, platform):

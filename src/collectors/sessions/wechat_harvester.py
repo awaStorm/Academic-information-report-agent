@@ -64,7 +64,7 @@ class WechatHarvester:
                 # 2. 获取 token
                 token = self.get_token(page)
                 if not token:
-                    return
+                    return {"success": False, "message": "未能获取微信 token，请重试登录"}
                 
                 # 3. 抓取当前会话的所有 Cookies
                 cookies = context.cookies()
@@ -80,9 +80,11 @@ class WechatHarvester:
                 self.save_auth_data(auth_data)
                 
                 print("你现在可以关闭浏览器或等待程序自动结束。")
+                return {"success": True, "message": "微信登录凭证已更新，请继续执行之前中断的抓取任务"}
                 
             except Exception as e:
                 print(f"运行过程中发生错误: {str(e)}")
+                return {"success": False, "message": f"微信登录失败: {str(e)}"}
             finally:
                 browser.close()
 

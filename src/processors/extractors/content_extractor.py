@@ -14,7 +14,7 @@ class ContentExtractor:
         """初始化配置"""
         pass
     
-    def clean_and_refine(self):
+    def clean_and_refine(self, progress_callback=None):
         """精炼数据字段并清洗内容"""
         if not os.path.exists(self.INPUT_FILE):
             print(f"❌ 未找到输入文件: {self.INPUT_FILE}")
@@ -26,7 +26,7 @@ class ContentExtractor:
         print(f"🧹 正在进行数据字段精炼...")
         refined_data = []
         
-        for item in data:
+        for idx, item in enumerate(data):
             # 1. 字段重命名与合并 (核心逻辑)
             # 优先取 content，如果之前处理过则取 body，都没有就空字符串
             raw_text = item.get("content") or item.get("body") or ""
@@ -48,6 +48,12 @@ class ContentExtractor:
             refined_item["body"] = "\n".join([line.strip() for line in refined_item["body"].split('\n') if line.strip()])
             
             refined_data.append(refined_item)
+            
+            if progress_callback and (idx + 1) % 5 == 0 or idx == len(data) - 1:
+                try:
+                    progress_callback(idx + 1, len(data), f"已精炼 {idx + 1}/{len(data)} 条")
+                except Exception:
+                    pass
         
         # 保存结果
         os.makedirs(os.path.dirname(self.OUTPUT_FILE), exist_ok=True)

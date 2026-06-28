@@ -13,16 +13,24 @@ load_dotenv()
 class XidianAgent:
     def __init__(self):
         """初始化 Agent，配置模型与记忆"""
+        api_key = os.getenv("LLM_API_KEY")
+        base_url = os.getenv("LLM_BASE_URL")
+        
+        if not api_key:
+            raise ValueError("LLM_API_KEY 未设置，请在 .env 中配置或通过前端保存")
+        
         self.client = OpenAI(
-            api_key=os.getenv("LLM_API_KEY"),
-            base_url=os.getenv("LLM_BASE_URL")
+            api_key=api_key,
+            base_url=base_url
         )
         
         # ✅ 修改：从 CONFIG 读取模型名称，不再硬编码[cite: 4]
-        self.model = CONFIG['analysis']['model_name']
+        self.model = CONFIG.get("analysis", {}).get("model_name", "")
+        if not self.model:
+            raise ValueError("模型名称未配置 (CONFIG['analysis']['model_name'] 为空)")
         # ✅ 修改：同步读取分析参数
-        self.temperature = CONFIG['analysis']['temperature']
-        self.max_tokens = CONFIG['analysis']['max_tokens']
+        self.temperature = CONFIG.get("analysis", {}).get("temperature", 0.1)
+        self.max_tokens = CONFIG.get("analysis", {}).get("max_tokens", 20000)
         
         self.history = []
         
@@ -35,7 +43,7 @@ class XidianAgent:
                 "## 执行准则\n"
                 "1. 链路逻辑：采集 -> 处理 -> 解析 -> 合流 -> 分析 -> 推送。\n"
                 "2. 交互性：在执行耗时工具前，先口头告知用户你的计划。\n"
-                "3. 异常处理：若凭证失效（AUTH_EXPIRED），引导用户调用扫码工具。\n"
+                "3. 异常处理：若凭证失效（AUTH_EXPIRED），立即调用对应的扫码登录工具（harvest_wechat_session 或 harvest_chaoxing_session）。登录完成后，**必须自动重新执行之前因凭证失效而中断的工具**，不要等待用户再次输入指令。\n"
                 "4.优先理解用户意图。如果用户说“只分析不推送”，就跳过微信相关工具和推送步骤。\n"
                 "5. 结束意图：当用户表达再见或任务完成时，请礼貌告别并在回复中包含'再见'或'退出'。"
                 "## 故障排除指引\n"
@@ -65,11 +73,16 @@ class XidianAgent:
                 max_tokens=self.max_tokens
             )
             
+            # 防御：API 可能返回非标准格式
+            if not hasattr(response, "choices"):
+                print(f"  [系统日志] ❌ LLM API 返回异常格式: {str(response)[:300]}")
+                break
+
             response_msg = response.choices[0].message
             self.history.append(response_msg)
 
             # ✅ 修改：根据 enable_console_report 开关决定是否打印回复
-            if response_msg.content and CONFIG['pusher']['enable_console_report']:
+            if response_msg.content and CONFIG.get("pusher", {}).get("enable_console_report", True):
                 print(f"\n🤖 Agent: {response_msg.content}")
 
             # 3. 检查是否需要调用工具

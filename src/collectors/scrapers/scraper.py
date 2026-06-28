@@ -1,6 +1,7 @@
 import json
 import requests
 import os
+import hashlib
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -43,7 +44,7 @@ class Scraper:
             print(f"❌ 解析凭证失败: {e}")
             return None
 
-    def fetch_and_save(self):
+    def fetch_and_save(self, progress_callback=None):
         """抓取数据并保存到本地文件"""
         os.makedirs(os.path.dirname(self.OUTPUT_FILE), exist_ok=True)
         cookies = self.load_cookies_from_json(self.COOKIE_PATH)
@@ -51,6 +52,11 @@ class Scraper:
             return {"success": False, "error_type": "AUTH", "message": "找不到超星凭证文件"}
 
         print("🚀 正在发起请求并准备保存原始响应...")
+        if progress_callback:
+            try:
+                progress_callback(0, 1, "正在请求超星通知列表")
+            except Exception:
+                pass
 
         try:
             # 设置 Cookie
@@ -61,7 +67,25 @@ class Scraper:
             
             if resp.status_code == 200:
                 data = resp.json()
+                # 检测超星登录失效：返回的 list 为空且 result 非成功，或含登录跳转标志
+                if data.get('result') == 0 and not data.get('notices', {}).get('list'):
+                    # result=0 且无数据，可能是登录失效
+                    pass
                 notices_list = data.get('notices', {}).get('list', [])
+                
+                # 超星登录失效典型特征：返回空数据或含 html 登录页
+                raw_text = resp.text[:500]
+                if 'login' in raw_text.lower() and 'chaoxing' in raw_text.lower() and not notices_list:
+                    print("❌ 超星登录已失效，需要重新扫码")
+                    return {"success": False, "error_type": "SESSION_EXPIRED", "message": "超星登录已失效，请重新扫码登录"}
+                
+                # 为通知列表中的每条记录生成 raw_hash（基于标题 + 通知ID）
+                if notices_list:
+                    for notice in notices_list:
+                        notice_id = notice.get('id', '')
+                        notice_title = notice.get('title', '')
+                        raw_hash = hashlib.md5((notice_title + str(notice_id)).encode('utf-8')).hexdigest()
+                        notice['raw_hash'] = raw_hash
                 
                 # --- 核心修正点：使用 self.OUTPUT_FILE ---
                 with open(self.OUTPUT_FILE, "w", encoding="utf-8") as f:
@@ -73,11 +97,19 @@ class Scraper:
                     print(f"📊 成功捕获 {len(notices_list)} 条通知数据。")
                     unread_count = sum(1 for item in notices_list if item.get('isread') == 0)
                     print(f"🔔 其中未读消息数量: {unread_count}")
+                    if progress_callback:
+                        try:
+                            progress_callback(1, 1, f"抓取完成，共 {len(notices_list)} 条通知")
+                        except Exception:
+                            pass
                     return {"success": True, "count": len(notices_list), "unread": unread_count}
                 else:
                     print("ℹ️ 服务器返回成功，但目前通知列表为空。")
                     return {"success": True, "count": 0}
             else:
+                if resp.status_code == 401:
+                    print("❌ 超星登录已失效 (HTTP 401)，需要重新扫码")
+                    return {"success": False, "error_type": "SESSION_EXPIRED", "message": "超星登录已失效，请重新扫码登录"}
                 print(f"❌ 请求失败，HTTP 状态码: {resp.status_code}")
                 return {"success": False, "error_type": "HTTP", "message": f"状态码 {resp.status_code}"}
 

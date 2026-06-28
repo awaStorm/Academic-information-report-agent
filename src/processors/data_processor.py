@@ -45,7 +45,7 @@ class DataProcessor:
             "content_id": item.get("idCode") or item.get("uuid")
         }
     
-    def run(self):
+    def run(self, progress_callback=None):
         """主执行流程"""
         os.makedirs(os.path.dirname(self.OUTPUT_REFINED), exist_ok=True)
         
@@ -59,7 +59,14 @@ class DataProcessor:
         notice_list = raw_data.get("notices", {}).get("list", [])
         print(f"📦 发现 {len(notice_list)} 条原始记录，开始情报提取...")
         
-        refined_data = [self.process_single_notice(item) for item in notice_list]
+        refined_data = []
+        for idx, item in enumerate(notice_list):
+            refined_data.append(self.process_single_notice(item))
+            if progress_callback and (idx + 1) % 5 == 0 or idx == len(notice_list) - 1:
+                try:
+                    progress_callback(idx + 1, len(notice_list), f"已清洗 {idx + 1}/{len(notice_list)} 条")
+                except Exception:
+                    pass
         refined_data.sort(key=lambda x: x['date'], reverse=True)
         
         with open(self.OUTPUT_REFINED, "w", encoding="utf-8") as f:

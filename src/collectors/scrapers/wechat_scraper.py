@@ -4,6 +4,7 @@ import os
 import time
 import sys
 import io
+import hashlib
 
 from src.utils.config_loader import CONFIG
 
@@ -50,6 +51,12 @@ class WechatScraper:
         try:
             search_resp = requests.get(search_url, params=search_params, headers=headers)
             search_data = search_resp.json()
+
+            # 检测登录失效：ret 非 0 或 base_resp 报错
+            base_ret = search_data.get("base_resp", {}).get("ret", 0)
+            if base_ret != 0:
+                print(f"❌ 微信登录已失效 (ret={base_ret})，需要重新扫码")
+                return "SESSION_EXPIRED"
             
             if not search_data.get("list"):
                 print(f"⚠️ 未找到公众号: {account_name}")
@@ -92,6 +99,11 @@ class WechatScraper:
                 articles = article_data.get("app_msg_list", [])
                 for a in articles: 
                     a['source_account'] = nickname
+                    # 生成 raw_hash（基于标题 + 文章链接，稳定不变）
+                    article_title = a.get('title', '')
+                    article_link = a.get('link', '')
+                    raw_hash = hashlib.md5((article_title + article_link).encode('utf-8')).hexdigest()
+                    a['raw_hash'] = raw_hash
                 return articles
             else:
                 err_msg = article_data.get('base_resp', {}).get('err_msg', 'unknown error')
@@ -102,7 +114,7 @@ class WechatScraper:
             print(f"💥 {account_name} 系统异常: {str(e)}")
             return []
     
-    def run_scraper_flow(self):
+    def run_scraper_flow(self, progress_callback=None):
         os.makedirs(os.path.dirname(self.OUTPUT_FILE), exist_ok=True)
         auth = self.load_auth()
         if not auth:
@@ -120,14 +132,27 @@ class WechatScraper:
             my_follow_list.append(self.extra_query)
     
         all_results = []
+        not_found_count = 0
+        session_expired = False
         print(f"🔔 开始批量巡检，目标公众号数量: {len(my_follow_list)}")
     
-        for name in my_follow_list:
+        for idx, name in enumerate(my_follow_list):
             print(f"\n--- 任务节点: {name} ---")
             articles = self.fetch_single_account(auth, name)
-            if articles:
+            if articles == "SESSION_EXPIRED":
+                session_expired = True
+                not_found_count += 1
+            elif articles:
                 print(f"📥 成功获取 {len(articles)} 篇文章")
                 all_results.extend(articles)
+            else:
+                not_found_count += 1
+            
+            if progress_callback:
+                try:
+                    progress_callback(idx + 1, len(my_follow_list), name, len(all_results))
+                except Exception:
+                    pass
         
             # 公众号切换之间的长间隔
             print("正在切换下一个目标...")
@@ -140,6 +165,12 @@ class WechatScraper:
         print(f"\n✨ 批量任务完成！共收集 {len(all_results)} 条情报。")
         if all_results:
             print(f"📂 数据已存入: {self.OUTPUT_FILE}")
+
+        # 全部未找到且存在会话过期 → 登录失效
+        if not_found_count == len(my_follow_list) and (session_expired or not all_results):
+            return {"success": False, "error_type": "SESSION_EXPIRED",
+                    "message": "微信公众号登录已失效，所有目标均未找到，请重新扫码登录"}
+
         return {"success": True, "count": len(all_results)}
 
 def run_wechat_scraper_flow(extra_query=None, progress_callback=None):
@@ -149,7 +180,7 @@ def run_wechat_scraper_flow(extra_query=None, progress_callback=None):
     progress_callback: 可选，进度回调函数
     """
     scraper = WechatScraper(extra_query=extra_query)
-    return scraper.run_scraper_flow()
+    return scraper.run_scraper_flow(progress_callback=progress_callback)
 
 if __name__ == "__main__":
     # 本地直接运行调试

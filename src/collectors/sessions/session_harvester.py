@@ -81,7 +81,7 @@ class SessionHarvester:
                 # 防止无限等待，可以加一个超时限制，Demo 先简化
                 if page.is_closed():
                     print("⚠️ 浏览器已关闭，获取凭证失败。")
-                    return
+                    return {"success": False, "message": "浏览器已关闭，超星登录失败"}
                 time.sleep(1) # 每秒检查一次 URL 状态
             
             print("✨ 检测到登录成功，正在进行最后的稳定性校验...")
@@ -98,6 +98,7 @@ class SessionHarvester:
             print("🎉 凭证获取成功，项目已彻底准备好数据源！")
             
             browser.close()
+            return {"success": True, "message": "超星登录凭证已更新，请继续执行之前中断的抓取任务"}
 
 if __name__ == "__main__":
     # 实例化会话采集器并执行

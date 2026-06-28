@@ -239,3 +239,13 @@ reports/
 
 # Chromium 下载缓存
 .playwright/.local-browsers/
+
+# 前端依赖
+node_modules/
+
+# IDE 工作区数据
+.codebuddy/
+
+# 临时标记文件
+_title_keep.bat
+task_human.txt

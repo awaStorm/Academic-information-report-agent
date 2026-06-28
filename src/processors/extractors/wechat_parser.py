@@ -44,7 +44,7 @@ class WechatParser:
         except Exception as e:
             return f"(解析异常: {str(e)})"
     
-    def run_parser(self):
+    def run_parser(self, progress_callback=None):
         if not os.path.exists(self.INPUT_FILE):
             print(f"❌ 找不到输入文件: {self.INPUT_FILE}")
             return {"success": False, "error_type": "NO_DATA", "message": f"找不到 {self.INPUT_FILE}"}
@@ -56,11 +56,17 @@ class WechatParser:
         
         refined_data = []
         
-        for item in raw_articles:
+        for idx, item in enumerate(raw_articles):
             title = item.get("title", "无标题")
             link = item.get("link", "")
             
             print(f"🚀 正在处理: {title[:20]}...")
+
+            if progress_callback:
+                try:
+                    progress_callback(idx + 1, len(raw_articles), title)
+                except Exception:
+                    pass
             
             # 核心抓取动作
             full_body = self.parse_single_article(link)

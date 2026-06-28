@@ -15,28 +15,30 @@ class FinalMerger:
     def __init__(self):
         pass
     
-    def merge_intelligence(self):
+    def merge_intelligence(self, progress_callback=None):
         """主合并逻辑"""
         all_news = []
         os.makedirs(os.path.dirname(self.FINAL_OUT), exist_ok=True)
         
-        # 1. 加载超星线数据
-        if os.path.exists(self.CHAOXING_IN):
-            with open(self.CHAOXING_IN, "r", encoding="utf-8") as f:
-                cx_data = json.load(f)
-                print(f"📥 [超星线] 汇入情报: {len(cx_data)} 条")
-                all_news.extend(cx_data)
-        else:
-            print("⚠️ 未找到超星线数据")
+        sources = [
+            ("超星线", self.CHAOXING_IN),
+            ("微信线", self.WECHAT_IN),
+        ]
         
-        # 2. 加载微信线数据
-        if os.path.exists(self.WECHAT_IN):
-            with open(self.WECHAT_IN, "r", encoding="utf-8") as f:
-                wx_data = json.load(f)
-                print(f"📥 [微信线] 汇入情报: {len(wx_data)} 条")
-                all_news.extend(wx_data)
-        else:
-            print("⚠️ 未找到微信线数据")
+        for idx, (label, path) in enumerate(sources):
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    print(f"📥 [{label}] 汇入情报: {len(data)} 条")
+                    all_news.extend(data)
+            else:
+                print(f"⚠️ 未找到{label}数据")
+            
+            if progress_callback:
+                try:
+                    progress_callback(idx + 1, len(sources), f"已加载 {label} 数据")
+                except Exception:
+                    pass
         
         if not all_news:
             print("❌ 无可用情报，请检查前置采集脚本。")

@@ -115,28 +115,26 @@ CUSTOM_CSS = """
 .icon-lg { width: 20px; height: 20px; vertical-align: -3px; }
 
 /* 按钮内图标对齐 */
-.gr-button .icon {
-    vertical-align: -3px;
-    margin-right: 4px;
-}
+.gr-button .icon { vertical-align: -3px; margin-right: 4px; }
 /* Markdown 标题内图标对齐 */
-.gr-markdown h3 .icon {
-    vertical-align: -3px;
-    margin-right: 6px;
-}
+.gr-markdown h3 .icon { vertical-align: -3px; margin-right: 6px; }
 /* details summary 内图标对齐 */
-details summary .icon {
-    vertical-align: -2px;
-    margin-right: 4px;
-}
+details summary .icon { vertical-align: -2px; margin-right: 4px; }
 
 /* ===== 全局基底 ===== */
 .gradio-container {
     background: #0a0a0f !important;
     color: #e4e4e7 !important;
-    max-width: 1100px !important;
+    max-width: 1200px !important;
     margin: 0 auto !important;
+    padding: 16px 24px !important;
     font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+
+/* 通用 Tab 内容内边距 */
+.tabitem .gr-row, .tabitem .gr-column, .tabitem .gr-form {
+    padding-left: 4px !important;
+    padding-right: 4px !important;
 }
 
 /* ===== 隐藏默认 Label 背景 ===== */
@@ -154,7 +152,7 @@ label.svelte-1b6s6s, label.svelte-1sgjba4 {
 
 label span.info { color: #71717a !important; font-size: 0.7rem !important; }
 
-/* ===== 轻量卡片 (替代厚重的 Group) ===== */
+/* ===== 轻量卡片 ===== */
 .gr-group, fieldset.svelte-1b6s6s {
     border: 1px solid rgba(255,255,255,0.06) !important;
     border-radius: 14px !important;
@@ -164,9 +162,7 @@ label span.info { color: #71717a !important; font-size: 0.7rem !important; }
     box-shadow: none !important;
     transition: border-color 0.2s ease !important;
 }
-.gr-group:hover {
-    border-color: rgba(255,255,255,0.1) !important;
-}
+.gr-group:hover { border-color: rgba(255,255,255,0.1) !important; }
 
 /* ===== 输入框 ===== */
 input[type="text"], input[type="number"], input[type="password"],
@@ -177,6 +173,7 @@ textarea, select, .gr-dropdown {
     color: #e4e4e7 !important;
     font-size: 0.85rem !important;
     transition: all 0.2s ease !important;
+    min-height: 40px !important;
 }
 input:focus, textarea:focus, select:focus {
     border-color: rgba(139,92,246,0.5) !important;
@@ -192,6 +189,7 @@ input::placeholder, textarea::placeholder { color: #52525b !important; }
     font-size: 0.85rem !important;
     letter-spacing: 0.01em;
     transition: all 0.2s ease !important;
+    min-height: 40px !important;
 }
 .gr-button.primary {
     background: rgba(139,92,246,0.12) !important;
@@ -214,18 +212,23 @@ input::placeholder, textarea::placeholder { color: #52525b !important; }
     color: #c4b5fd !important;
 }
 
+/* 保存按钮区域加大 */
+.save-btn-container .gr-button.primary {
+    padding: 14px 32px !important;
+    font-size: 0.95rem !important;
+    min-height: 48px !important;
+}
+
 /* ===== Tab 导航 ===== */
 .tabs {
     border-bottom: 1px solid rgba(255,255,255,0.06) !important;
-    margin-bottom: 24px !important;
+    margin-bottom: 28px !important;
 }
-.tab-nav {
-    gap: 4px !important;
-}
+.tab-nav { gap: 6px !important; }
 .tab-nav button {
     color: #71717a !important;
     border-bottom: 2px solid transparent !important;
-    padding: 10px 16px !important;
+    padding: 12px 20px !important;
     font-weight: 500 !important;
     font-size: 0.85rem !important;
     border-radius: 8px 8px 0 0 !important;
@@ -246,7 +249,10 @@ input::placeholder, textarea::placeholder { color: #52525b !important; }
     background: rgba(255,255,255,0.02) !important;
     border: 1px solid rgba(255,255,255,0.06) !important;
     border-radius: 10px !important;
-    padding: 10px 14px !important;
+    padding: 12px 16px !important;
+    min-height: 52px !important;
+    display: flex !important;
+    align-items: center !important;
     transition: all 0.2s ease !important;
 }
 .gr-checkbox:hover {
@@ -256,6 +262,11 @@ input::placeholder, textarea::placeholder { color: #52525b !important; }
 .gr-checkbox input:checked + span {
     color: #c4b5fd !important;
     font-weight: 500 !important;
+}
+
+/* 偏好设置网格 — 2×4 等宽排列 */
+.prefs-grid .gr-checkbox {
+    width: 100% !important;
 }
 
 /* ===== 状态标签 ===== */
@@ -285,8 +296,12 @@ input::placeholder, textarea::placeholder { color: #52525b !important; }
     background: rgba(255,255,255,0.02);
     border: 1px solid rgba(255,255,255,0.06);
     border-radius: 14px;
-    padding: 20px;
+    padding: 18px 12px;
     text-align: center;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
     transition: all 0.2s ease;
 }
 .stat-card:hover {
@@ -320,6 +335,16 @@ input::placeholder, textarea::placeholder { color: #52525b !important; }
     border-color: rgba(255,255,255,0.1);
 }
 
+/* 记录列表容器 — 限制高度可滚动 */
+.records-scroll {
+    max-height: 600px !important;
+    overflow-y: auto !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    border-radius: 12px !important;
+    padding: 12px !important;
+    background: rgba(255,255,255,0.01) !important;
+}
+
 /* ===== 终端风格 Agent 输出 ===== */
 .agent-terminal {
     background: #0c0c14 !important;
@@ -331,71 +356,47 @@ input::placeholder, textarea::placeholder { color: #52525b !important; }
     color: #c9d1d9 !important;
     padding: 16px !important;
     overflow-y: auto !important;
-    min-height: 420px !important;
-    max-height: 560px !important;
+    min-height: 380px !important;
+    max-height: 480px !important;
     word-wrap: break-word !important;
     white-space: pre-wrap !important;
 }
 .agent-terminal .log-line { margin: 1px 0; }
-.agent-terminal .log-user {
-    color: #a78bfa !important;
-    font-weight: 600 !important;
-}
-.agent-terminal .log-agent {
-    color: #58a6ff !important;
-    font-weight: 600 !important;
-}
-.agent-terminal .log-status {
-    color: #8b949e !important;
-}
-.agent-terminal .log-ok {
-    color: #3fb950 !important;
-}
-.agent-terminal .log-err {
-    color: #f85149 !important;
-}
-.agent-terminal .log-warn {
-    color: #d29922 !important;
-}
-.agent-terminal .log-tool {
-    color: #79c0ff !important;
-}
-.agent-terminal .log-divider {
-    color: #30363d !important;
-    margin: 6px 0;
-}
+.agent-terminal .log-user { color: #a78bfa !important; font-weight: 600 !important; }
+.agent-terminal .log-agent { color: #58a6ff !important; font-weight: 600 !important; }
+.agent-terminal .log-status { color: #8b949e !important; }
+.agent-terminal .log-ok { color: #3fb950 !important; }
+.agent-terminal .log-err { color: #f85149 !important; }
+.agent-terminal .log-warn { color: #d29922 !important; }
+.agent-terminal .log-tool { color: #79c0ff !important; }
+.agent-terminal .log-divider { color: #30363d !important; margin: 6px 0; }
 .agent-terminal .cursor-blink {
-    display: inline-block;
-    width: 8px;
-    height: 15px;
-    background: #58a6ff;
-    vertical-align: text-bottom;
-    animation: blink 1s step-end infinite;
-    margin-left: 2px;
+    display: inline-block; width: 8px; height: 15px;
+    background: #58a6ff; vertical-align: text-bottom;
+    animation: blink 1s step-end infinite; margin-left: 2px;
 }
-@keyframes blink {
-    50% { opacity: 0; }
-}
+@keyframes blink { 50% { opacity: 0; } }
 .agent-terminal .typing-dots::after {
-    content: '...';
-    animation: dots 1.5s steps(4, end) infinite;
+    content: '...'; animation: dots 1.5s steps(4, end) infinite;
 }
 @keyframes dots {
-    0%  { content: ''; }
-    25% { content: '.'; }
-    50% { content: '..'; }
-    75% { content: '...'; }
+    0%  { content: ''; } 25% { content: '.'; }
+    50% { content: '..'; } 75% { content: '...'; }
 }
 
-/* 报告查看器 — 全宽展开 */
+/* 报告查看器 — 限制高度可滚动 */
 .report-viewer {
-    border: none !important;
-    border-radius: 0 !important;
-    padding: 0 !important;
-    background: transparent !important;
-    max-height: none !important;
-    overflow: visible !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    border-radius: 12px !important;
+    padding: 20px 24px !important;
+    background: rgba(255,255,255,0.01) !important;
+    max-height: 600px !important;
+    overflow-y: auto !important;
 }
+.report-viewer h1 { font-size: 1.3rem !important; }
+.report-viewer h2 { font-size: 1.1rem !important; }
+.report-viewer h3 { font-size: 0.95rem !important; }
+.report-viewer pre { overflow-x: auto !important; }
 
 /* ===== 滚动条 ===== */
 ::-webkit-scrollbar { width: 5px; }
@@ -404,33 +405,31 @@ input::placeholder, textarea::placeholder { color: #52525b !important; }
 ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
 
 /* ===== 间距优化 ===== */
-.gr-row { gap: 12px !important; }
-.gr-column { gap: 12px !important; }
-.gr-form { gap: 16px !important; }
+.gr-row { gap: 16px !important; }
+.gr-column { gap: 16px !important; }
+.gr-form { gap: 18px !important; }
 
 /* ===== 分割线 ===== */
 hr {
     border-color: rgba(255,255,255,0.06) !important;
-    margin: 24px 0 !important;
+    margin: 28px 0 !important;
 }
 
 /* ===== Markdown 降噪 ===== */
 .gr-markdown h1 {
-    color: #fafafa !important;
-    font-size: 1.5rem !important;
-    font-weight: 700 !important;
-    letter-spacing: -0.02em;
-    margin-bottom: 4px !important;
+    color: #fafafa !important; font-size: 1.5rem !important;
+    font-weight: 700 !important; letter-spacing: -0.02em; margin-bottom: 4px !important;
 }
 .gr-markdown h3 {
-    color: #e4e4e7 !important;
-    font-size: 1rem !important;
-    font-weight: 600 !important;
-    margin: 0 0 8px 0 !important;
+    color: #e4e4e7 !important; font-size: 1rem !important;
+    font-weight: 600 !important; margin: 4px 0 10px 0 !important;
 }
-.gr-markdown p, .gr-markdown li { color: #a1a1aa !important; font-size: 0.85rem !important; }
+.gr-markdown p, .gr-markdown li { color: #a1a1aa !important; font-size: 0.85rem !important; line-height: 1.6 !important; }
 .gr-markdown strong { color: #d4d4d8 !important; }
 .gr-markdown a { color: #a78bfa !important; }
+
+/* ===== 页脚 ===== */
+.footer-info { text-align: center !important; color: #52525b !important; font-size: 0.75rem !important; }
 """
 
 
@@ -513,6 +512,12 @@ def save_settings_yaml(settings_dict):
         current = _deep_merge(current, settings_dict)
         with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(current, f, allow_unicode=True, default_flow_style=False)
+        # 同步更新内存中的 CONFIG，避免刷新后读取到旧值
+        for k, v in settings_dict.items():
+            if k in CONFIG and isinstance(CONFIG[k], dict) and isinstance(v, dict):
+                CONFIG[k] = _deep_merge(CONFIG[k], v)
+            else:
+                CONFIG[k] = v
         return True
     except Exception as e:
         return str(e)
@@ -600,8 +605,9 @@ class SchedulerManager:
         self.last_run_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             result = run_analysis_flow()
-            # run_analysis_flow 返回 bool
-            success = bool(result)
+            # run_analysis_flow 返回 dict: {"success": bool, "pushed": int, "message": str}
+            success = result.get("success", False) if isinstance(result, dict) else bool(result)
+            pushed_count = result.get("pushed", 0) if isinstance(result, dict) else 0
             if success:
                 self.failure_count = 0
                 message = "执行成功"
@@ -613,13 +619,13 @@ class SchedulerManager:
                 if self.failure_count >= self.failure_threshold:
                     self._send_failure_alert(message)
                     print(f"[Scheduler] 已发送失败告警（连续失败 {self.failure_count} 次）")
-            self._save_run_log(success, message)
+            self._save_run_log(success, message, pushed_count)
             print(f"[Scheduler] 定时任务执行完成 | {message}")
         except Exception as e:
             self.failure_count += 1
             error_msg = str(e)
             self.last_run_result = f"执行失败: {error_msg[:50]}"
-            self._save_run_log(False, f"异常: {error_msg}")
+            self._save_run_log(False, f"异常: {error_msg}", 0)
             if self.failure_count >= self.failure_threshold:
                 self._send_failure_alert(error_msg)
             print(f"[Scheduler] 定时任务执行异常: {error_msg}")
@@ -736,24 +742,71 @@ def clear_avatar():
 # 配置面板逻辑 (保持不变)
 # ============================================================
 
+def _render_tag_list(targets: list) -> str:
+    """将公众号列表渲染为标签式 HTML，每个标签带 × 删除按钮"""
+    if not targets:
+        return "<div style='color:#71717a;font-size:0.8rem;padding:4px 0;'>暂无公众号，请在上方输入名称后点击添加</div>"
+    tags = []
+    for t in targets:
+        safe = _html_escape(t)
+        tags.append(
+            f"<span style='display:inline-flex;align-items:center;gap:4px;"
+            f"background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.3);"
+            f"border-radius:6px;padding:3px 10px;font-size:0.8rem;color:#c4b5fd;margin:3px;'>"
+            f"{safe}"
+            f"</span>"
+        )
+    return "<div style='display:flex;flex-wrap:wrap;gap:0;margin-top:6px;'>" + "".join(tags) + "</div>"
+
+def add_wechat_target(name: str, current_list: list):
+    """添加一个公众号到列表"""
+    name = name.strip().replace(",", "，").replace("，", "")  # 去掉逗号防误输入
+    if not name:
+        return gr.update(value=""), current_list, _render_tag_list(current_list), gr.update(choices=current_list)
+    if name in current_list:
+        return gr.update(value=""), current_list, _render_tag_list(current_list), gr.update(choices=current_list)
+    new_list = current_list + [name]
+    return gr.update(value=""), new_list, _render_tag_list(new_list), gr.update(choices=new_list, value=None)
+
+def remove_wechat_target(name: str, current_list: list):
+    """从列表中移除指定公众号"""
+    if not name:
+        return current_list, _render_tag_list(current_list), gr.update(choices=current_list)
+    new_list = [t for t in current_list if t != name]
+    return new_list, _render_tag_list(new_list), gr.update(choices=new_list, value=None)
+
 def load_current_config():
+    # 每次读取前从文件重新加载，确保与磁盘一致
+    config_path = os.path.join(get_project_root(), "configs", "settings.yaml")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                file_config = yaml.safe_load(f) or {}
+            for k, v in file_config.items():
+                if k in CONFIG and isinstance(CONFIG[k], dict) and isinstance(v, dict):
+                    CONFIG[k] = _deep_merge(CONFIG[k], v)
+                else:
+                    CONFIG[k] = v
+        except Exception:
+            pass  # 读取失败时使用内存中的 CONFIG
+
     return {
         "llm_api_key": os.getenv("LLM_API_KEY", ""),
         "llm_base_url": os.getenv("LLM_BASE_URL", ""),
-        "llm_model": os.getenv("LLM_MODEL", CONFIG["analysis"]["model_name"]),
-        "temperature": CONFIG["analysis"].get("temperature", 0.1),
-        "max_tokens": CONFIG["analysis"].get("max_tokens", 20000),
-        "fetch_count": CONFIG["collectors"]["wechat"].get("fetch_count", 5),
-        "delay_range": CONFIG["collectors"]["wechat"].get("delay_range", [5, 8]),
-        "wechat_targets": CONFIG["collectors"]["wechat"].get("targets", []),
+        "llm_model": os.getenv("LLM_MODEL", CONFIG.get("analysis", {}).get("model_name", "")),
+        "temperature": CONFIG.get("analysis", {}).get("temperature", 0.1),
+        "max_tokens": CONFIG.get("analysis", {}).get("max_tokens", 20000),
+        "fetch_count": CONFIG.get("collectors", {}).get("wechat", {}).get("fetch_count", 5),
+        "delay_range": CONFIG.get("collectors", {}).get("wechat", {}).get("delay_range", [5, 8]),
+        "wechat_targets": CONFIG.get("collectors", {}).get("wechat", {}).get("targets", []),
         "wecom_webhook": os.getenv("WECOM_WEBHOOK", ""),
         "serverchan_key": os.getenv("SERVERCHAN_SENDKEY", ""),
-        "enable_wecom": CONFIG["pusher"].get("enable_wecom", True),
-        "enable_console_report": CONFIG["pusher"].get("enable_console_report", True),
-        "scheduler_enabled": CONFIG["scheduler"].get("enabled", False),
-        "run_times": CONFIG["scheduler"].get("run_times", ["08:00"]),
-        "failure_alert_threshold": CONFIG["scheduler"].get("failure_alert_threshold", 3),
-        "dashboard_page_size": CONFIG["web_ui"].get("dashboard_page_size", 20),
+        "enable_wecom": CONFIG.get("pusher", {}).get("enable_wecom", True),
+        "enable_console_report": CONFIG.get("pusher", {}).get("enable_console_report", True),
+        "scheduler_enabled": CONFIG.get("scheduler", {}).get("enabled", False),
+        "run_times": CONFIG.get("scheduler", {}).get("run_times", ["08:00"]),
+        "failure_alert_threshold": CONFIG.get("scheduler", {}).get("failure_alert_threshold", 3),
+        "dashboard_page_size": CONFIG.get("web_ui", {}).get("dashboard_page_size", 20),
     }
 
 def save_all_config(
@@ -781,14 +834,14 @@ def save_all_config(
     if llm_model:
         result = save_env_var("LLM_MODEL", llm_model)
         if result is True:
-            CONFIG["analysis"]["model_name"] = llm_model
+            CONFIG.setdefault("analysis", {})["model_name"] = llm_model
         else:
             results.append(f"模型配置保存失败: {result}")
 
     # 保存 analysis 块 (model_name + temperature + max_tokens)
     result = save_settings_yaml({
         "analysis": {
-            "model_name": llm_model or CONFIG["analysis"].get("model_name", ""),
+            "model_name": llm_model or CONFIG.get("analysis", {}).get("model_name", ""),
             "temperature": float(temperature),
             "max_tokens": int(max_tokens),
         }
@@ -808,7 +861,7 @@ def save_all_config(
         results.append("Server 酱 SendKey 已保存" if result is True else f"SendKey 保存失败: {result}")
 
     # 保存采集参数 + 公众号关注列表
-    targets_list = [t.strip() for t in wechat_targets.split(",") if t.strip()]
+    targets_list = wechat_targets if isinstance(wechat_targets, list) else [t.strip() for t in wechat_targets.split(",") if t.strip()]
     result = save_settings_yaml({
         "collectors": {
             "wechat": {
@@ -1071,10 +1124,11 @@ def _agent_worker(user_message: str, log_q: _queue_mod.Queue):
     """后台线程：执行 Agent 逻辑，通过队列推送日志"""
     agent = _get_agent()
 
-    original_console = CONFIG['pusher']['enable_console_report']
-    CONFIG['pusher']['enable_console_report'] = False
-
     try:
+        # 推送时临时关闭控制台输出
+        original_console = CONFIG.get("pusher", {}).get("enable_console_report", True)
+        CONFIG.setdefault("pusher", {})["enable_console_report"] = False
+
         current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         timed_input = f"【当前系统时间：{current_time_str}】\n用户指令：{user_message}"
         agent.history.append({"role": "user", "content": timed_input})
@@ -1092,6 +1146,11 @@ def _agent_worker(user_message: str, log_q: _queue_mod.Queue):
                 temperature=agent.temperature,
                 max_tokens=agent.max_tokens
             )
+
+            # 防御：API 可能返回非标准格式
+            if not hasattr(response, "choices"):
+                log_q.put({"cls": "err", "html": f"❌ [{_ts()}] LLM API 返回异常格式: {str(response)[:300]}"})
+                break
 
             response_msg = response.choices[0].message
             agent.history.append(response_msg)
@@ -1133,10 +1192,25 @@ def _agent_worker(user_message: str, log_q: _queue_mod.Queue):
                         q.put({"cls": "tool", "html": msg, "_replace_last_progress": True})
                     return callback
 
-                if function_name == "run_wechat_scraper":
-                    args["progress_callback"] = _make_scraper_callback(log_q)
-                elif function_name == "parse_wechat_content":
-                    args["progress_callback"] = _make_parser_callback(log_q)
+                def _make_progress_callback(q, icon, label):
+                    """通用进度回调 — 适配 (current, total, msg) 三参数签名"""
+                    def callback(current, total, msg):
+                        line = f"{icon} [{_ts()}] {label} ({current}/{total}): {msg}"
+                        q.put({"cls": "tool", "html": line, "_replace_last_progress": True})
+                    return callback
+
+                # 为各工具注入对应的进度回调
+                _PROGRESS_CB_MAP = {
+                    "run_wechat_scraper":        lambda q: _make_scraper_callback(q),
+                    "parse_wechat_content":       lambda q: _make_parser_callback(q),
+                    "run_chaoxing_scraper":       lambda q: _make_progress_callback(q, "📡", "超星抓取"),
+                    "process_raw_data":           lambda q: _make_progress_callback(q, "🧹", "数据清洗"),
+                    "refine_data_for_ai":         lambda q: _make_progress_callback(q, "⚙️", "字段精炼"),
+                    "merge_all_intelligence":     lambda q: _make_progress_callback(q, "🔗", "情报合流"),
+                    "analyze_and_push_intelligence": lambda q: _make_progress_callback(q, "🧠", "AI 分析"),
+                }
+                if function_name in _PROGRESS_CB_MAP:
+                    args["progress_callback"] = _PROGRESS_CB_MAP[function_name](log_q)
 
                 result = execute_tool(function_name, **args)
 
@@ -1152,6 +1226,17 @@ def _agent_worker(user_message: str, log_q: _queue_mod.Queue):
                     log_q.put({"cls": "ok", "html": f"✅ [{_ts()}] {tool_display} → {result_summary}"})
                 else:
                     log_q.put({"cls": "err", "html": f"❌ [{_ts()}] {tool_display} → {result_summary}"})
+
+                # 检测会话过期 → 自动提示 LLM 重新登录
+                if isinstance(result, dict) and result.get("error_type") == "SESSION_EXPIRED":
+                    login_tool = "harvest_wechat_session" if function_name == "run_wechat_scraper" else "harvest_chaoxing_session"
+                    login_display = _friendly_tool_name(login_tool)
+                    log_q.put({"cls": "warn", "html": f"🔄 [{_ts()}] 检测到登录失效，自动触发 {login_display}..."})
+                    # 向 LLM 返回明确的错误指引
+                    result["auto_hint"] = (
+                        f"登录已失效，请立即调用 {login_tool} 工具重新登录，"
+                        f"登录完成后再重新执行 {function_name}。"
+                    )
 
                 agent.history.append({
                     "tool_call_id": tool_call.id,
@@ -1169,7 +1254,10 @@ def _agent_worker(user_message: str, log_q: _queue_mod.Queue):
         log_q.put({"cls": "err", "html": f"<pre style='color:#f85149;font-size:11px'>{_html_escape(tb[-500:])}</pre>"})
 
     finally:
-        CONFIG['pusher']['enable_console_report'] = original_console
+        try:
+            CONFIG.setdefault("pusher", {})["enable_console_report"] = original_console
+        except NameError:
+            pass  # original_console 未定义（try 块开头就失败了）
         log_q.put(None)  # 哨兵：标记结束
 
 
@@ -1217,7 +1305,7 @@ def agent_chat_respond(user_message: str, log_entries_state: list):
         else:
             # 标记进度行（scraper/parser 回调产生的行）
             is_progress = item["cls"] in ("ok", "tool") and any(
-                kw in item["html"] for kw in ("抓取公众号", "解析文章")
+                kw in item["html"] for kw in ("抓取公众号", "解析文章", "超星抓取", "数据清洗", "字段精炼", "情报合流", "AI 分析")
             )
             log_entries_state.append({"cls": item["cls"], "html": item["html"], "_is_progress": is_progress})
 
@@ -1240,7 +1328,7 @@ def agent_chat_respond(user_message: str, log_entries_state: list):
                     log_entries_state.append({"cls": extra["cls"], "html": extra["html"], "_is_progress": True})
             else:
                 is_progress = extra["cls"] in ("ok", "tool") and any(
-                    kw in extra["html"] for kw in ("抓取公众号", "解析文章")
+                    kw in extra["html"] for kw in ("抓取公众号", "解析文章", "超星抓取", "数据清洗", "字段精炼", "情报合流", "AI 分析")
                 )
                 log_entries_state.append({"cls": extra["cls"], "html": extra["html"], "_is_progress": is_progress})
 
@@ -1305,9 +1393,11 @@ def _summarize_tool_result(name: str, result) -> str:
         msg = result.get("message", "已推送")
         return msg[:60]
     elif name == "analyze_and_push_intelligence":
-        pushed = result.get("pushed_count", 0)
-        status = result.get("status", "")
-        if status == "no_new_data":
+        pushed = result.get("pushed", 0)
+        msg = result.get("message", "")
+        if not result.get("success"):
+            return f"失败: {msg[:50]}"
+        if pushed == 0:
             return "无新增情报"
         return f"推送 {pushed} 条情报"
     elif name in ("harvest_chaoxing_session", "harvest_wechat_session"):
@@ -1424,27 +1514,27 @@ def build_ui():
             # ==================== Tab 1: 配置面板 ====================
             with gr.TabItem("配置面板"):
 
-                # -- 顶部状态栏 --
-                with gr.Row():
-                    with gr.Column(scale=1):
+                # -- 顶部状态栏 (4 卡片等宽) --
+                with gr.Row(equal_height=True):
+                    with gr.Column(scale=1, min_width=100):
                         gr.HTML(
                             f"<div class='stat-card'>"
                             f"<div class='stat-value' style='color:#8b5cf6;'>{stats['today']}</div>"
                             f"<div class='stat-label'>今日推送</div></div>"
                         )
-                    with gr.Column(scale=1):
+                    with gr.Column(scale=1, min_width=100):
                         gr.HTML(
                             f"<div class='stat-card'>"
                             f"<div class='stat-value' style='color:#06b6d4;'>{stats['week']}</div>"
                             f"<div class='stat-label'>本周推送</div></div>"
                         )
-                    with gr.Column(scale=1):
+                    with gr.Column(scale=1, min_width=100):
                         gr.HTML(
                             f"<div class='stat-card'>"
                             f"<div class='stat-value' style='color:#22c55e;'>{stats['wechat']}</div>"
                             f"<div class='stat-label'>微信情报</div></div>"
                         )
-                    with gr.Column(scale=1):
+                    with gr.Column(scale=1, min_width=100):
                         gr.HTML(
                             f"<div class='stat-card'>"
                             f"<div class='stat-value' style='color:#f59e0b;'>{stats['chaoxing']}</div>"
@@ -1453,10 +1543,10 @@ def build_ui():
 
                 gr.Markdown("---")
 
-                # -- 两栏配置区 --
-                with gr.Row():
+                # -- 两栏配置区 (equal_height 对齐) --
+                with gr.Row(equal_height=True):
                     # 左栏：模型 + 采集
-                    with gr.Column(scale=1):
+                    with gr.Column(scale=1, min_width=280):
                         gr.Markdown(f"### {_icon_text('cpu', 'LLM 模型')}")
                         llm_api_key = gr.Textbox(
                             label="API Key",
@@ -1464,20 +1554,18 @@ def build_ui():
                             placeholder="sk-...",
                             type="password",
                         )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             llm_base_url = gr.Textbox(
                                 label="Base URL",
                                 value=config["llm_base_url"],
                                 placeholder="https://api.openai.com/v1",
-                                scale=2,
                             )
                             llm_model = gr.Textbox(
                                 label="模型",
                                 value=config["llm_model"],
                                 placeholder="gpt-4o / deepseek-chat",
-                                scale=1,
                             )
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             temperature = gr.Number(
                                 label="Temperature",
                                 value=config["temperature"],
@@ -1490,33 +1578,42 @@ def build_ui():
                             )
 
                         gr.Markdown(f"### {_icon_text('radio', '采集参数')}")
-                        with gr.Row():
+                        with gr.Row(equal_height=True):
                             fetch_count = gr.Number(
                                 label="每次抓取",
                                 value=config["fetch_count"],
                                 minimum=1, maximum=20, step=1,
                             )
                             delay_min = gr.Number(
-                                label="最小间隔(秒)",
+                                label="最小间隔(s)",
                                 value=config["delay_range"][0],
                                 minimum=1, maximum=30, step=1,
                             )
                             delay_max = gr.Number(
-                                label="最大间隔(秒)",
+                                label="最大间隔(s)",
                                 value=config["delay_range"][1],
                                 minimum=1, maximum=60, step=1,
                             )
-                        wechat_targets = gr.Textbox(
-                            label="公众号关注列表",
-                            value=",".join(config["wechat_targets"]),
-                            placeholder="西小电星球, 西电社团, 西电体育",
+                        wechat_target_input = gr.Textbox(
+                            label="",
+                            placeholder="输入公众号名称后点击添加",
+                            show_label=False,
                         )
-                        gr.Markdown(
-                            "<span style='color:#71717a;font-size:0.75rem;'>多个公众号用英文逗号分隔</span>"
+                        with gr.Row(equal_height=True):
+                            wechat_target_add_btn = gr.Button("➕ 添加", min_width=70)
+                            wechat_target_remove_sel = gr.Dropdown(
+                                choices=config["wechat_targets"],
+                                show_label=False,
+                                interactive=True,
+                            )
+                            wechat_target_remove_btn = gr.Button("➖ 移除", min_width=70)
+                        wechat_targets = gr.State(config["wechat_targets"])
+                        wechat_targets_display = gr.HTML(
+                            value=_render_tag_list(config["wechat_targets"])
                         )
 
                     # 右栏：推送 + 定时
-                    with gr.Column(scale=1):
+                    with gr.Column(scale=1, min_width=280):
                         gr.Markdown(f"### {_icon_text('send', '推送渠道')}")
                         wecom_input = gr.Textbox(
                             label="企业微信 Webhook",
@@ -1538,12 +1635,13 @@ def build_ui():
                             label="启用控制台报告输出",
                             value=config["enable_console_report"],
                         )
-                        with gr.Row():
-                            wecom_test_btn = gr.Button("测试企业微信", size="sm")
+                        with gr.Row(equal_height=True):
+                            wecom_test_btn = gr.Button("测试企业微信")
                             wecom_test_result = gr.Textbox(
                                 show_label=False, interactive=False, container=False
                             )
-                            serverchan_test_btn = gr.Button("测试 Server酱", size="sm")
+                        with gr.Row(equal_height=True):
+                            serverchan_test_btn = gr.Button("测试 Server酱")
                             serverchan_test_result = gr.Textbox(
                                 show_label=False, interactive=False, container=False
                             )
@@ -1563,15 +1661,15 @@ def build_ui():
                             value=config["failure_alert_threshold"],
                             minimum=1, maximum=20, step=1,
                         )
-                        with gr.Row():
-                            refresh_scheduler_btn = gr.Button("刷新状态", size="sm")
+                        with gr.Row(equal_height=True):
+                            refresh_scheduler_btn = gr.Button("刷新状态", min_width=90)
                             scheduler_status = gr.Markdown("**状态**: --")
 
                 gr.Markdown("---")
 
                 # -- 高级设置 --
                 with gr.Row():
-                    with gr.Column(scale=1):
+                    with gr.Column(scale=1, min_width=160):
                         dashboard_page_size = gr.Number(
                             label="仪表盘每页记录数",
                             value=config["dashboard_page_size"],
@@ -1581,10 +1679,10 @@ def build_ui():
                 gr.Markdown("---")
 
                 # -- 执行日志 --
-                with gr.Row():
-                    with gr.Column(scale=1):
+                with gr.Row(equal_height=True):
+                    with gr.Column(scale=1, min_width=140):
                         gr.Markdown(f"### {_icon_text('scroll', '执行日志')}")
-                        log_btn = gr.Button("查看最近日志", size="sm")
+                        log_btn = gr.Button("查看最近日志")
                     with gr.Column(scale=3):
                         log_display = gr.Textbox(
                             label="", interactive=False, lines=4, show_label=False,
@@ -1593,14 +1691,36 @@ def build_ui():
 
                 gr.Markdown("---")
 
-                # -- 保存按钮 --
-                with gr.Row():
-                    save_btn = gr.Button("保存所有配置", variant="primary", size="lg")
+                # -- 保存按钮 (居中) --
+                with gr.Row(elem_classes=["save-btn-container"]):
+                    with gr.Column(scale=3):
+                        pass
+                    with gr.Column(scale=1, min_width=200):
+                        save_btn = gr.Button("💾 保存所有配置", variant="primary", size="lg")
+                    with gr.Column(scale=3):
+                        pass
                 save_result = gr.Textbox(
                     label="", interactive=False, lines=3, show_label=False
                 )
 
-                # 事件绑定
+                # 事件绑定 — 公众号标签增删
+                wechat_target_add_btn.click(
+                    add_wechat_target,
+                    inputs=[wechat_target_input, wechat_targets],
+                    outputs=[wechat_target_input, wechat_targets, wechat_targets_display, wechat_target_remove_sel],
+                )
+                wechat_target_input.submit(
+                    add_wechat_target,
+                    inputs=[wechat_target_input, wechat_targets],
+                    outputs=[wechat_target_input, wechat_targets, wechat_targets_display, wechat_target_remove_sel],
+                )
+                wechat_target_remove_btn.click(
+                    remove_wechat_target,
+                    inputs=[wechat_target_remove_sel, wechat_targets],
+                    outputs=[wechat_targets, wechat_targets_display, wechat_target_remove_sel],
+                )
+
+                # 事件绑定 — 保存配置
                 save_btn.click(
                     save_all_config,
                     inputs=[
@@ -1625,30 +1745,34 @@ def build_ui():
             with gr.TabItem("情报仪表盘"):
                 gr.Markdown("### 情报推送记录")
 
-                with gr.Row():
-                    with gr.Column(scale=3):
-                        with gr.Row():
-                            start_date = gr.Textbox(
-                                label="开始日期",
-                                placeholder="YYYY-MM-DD",
-                                value=(datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
-                            )
-                            end_date = gr.Textbox(
-                                label="结束日期",
-                                placeholder="YYYY-MM-DD",
-                                value=datetime.now().strftime("%Y-%m-%d"),
-                            )
-                            platform_filter = gr.Dropdown(
-                                choices=["全部", "超星", "微信"],
-                                value="全部",
-                                label="平台",
-                            )
-                    with gr.Column(scale=1):
-                        refresh_btn = gr.Button("刷新记录", variant="primary")
-                        count_display = gr.Markdown("**记录数**: --")
+                with gr.Row(equal_height=True):
+                    with gr.Column(scale=1, min_width=140):
+                        start_date = gr.Textbox(
+                            label="开始日期",
+                            placeholder="YYYY-MM-DD",
+                            value=(datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
+                        )
+                    with gr.Column(scale=1, min_width=140):
+                        end_date = gr.Textbox(
+                            label="结束日期",
+                            placeholder="YYYY-MM-DD",
+                            value=datetime.now().strftime("%Y-%m-%d"),
+                        )
+                    with gr.Column(scale=1, min_width=100):
+                        platform_filter = gr.Dropdown(
+                            choices=["全部", "超星", "微信"],
+                            value="全部",
+                            label="平台",
+                        )
+                    with gr.Column(scale=2, min_width=180):
+                        gr.Markdown("")
+                        with gr.Row(equal_height=True):
+                            refresh_btn = gr.Button("🔄 刷新记录", variant="primary")
+                            count_display = gr.Markdown("**记录数**: --")
 
                 records_display = gr.HTML(
-                    "<div style='text-align:center;color:#71717a;padding:40px 0;'>点击「刷新记录」加载推送历史...</div>"
+                    value="<div style='text-align:center;color:#71717a;padding:40px 0;'>点击「刷新记录」加载推送历史...</div>",
+                    elem_classes=["records-scroll"],
                 )
 
                 refresh_btn.click(
@@ -1664,29 +1788,35 @@ def build_ui():
 
             # ==================== Tab 3: 偏好设置 ====================
             with gr.TabItem("偏好设置"):
-                gr.Markdown(
-                    "### 选择感兴趣的类别"
-                )
-                gr.Markdown(
-                    "勾选的类别将在情报分析时获得更高优先级"
-                )
+                gr.Markdown("### 选择感兴趣的类别")
+                gr.Markdown("勾选的类别将在情报分析时获得更高优先级")
 
                 preferences = {}
-                with gr.Row():
+                # 第一行 4 个
+                with gr.Row(equal_height=True, elem_classes=["prefs-grid"]):
                     for cat in ALL_CATEGORIES[:4]:
-                        preferences[cat] = gr.Checkbox(
-                            label=cat,
-                            value=(cat in initial_categories),
-                        )
-                with gr.Row():
+                        with gr.Column(scale=1, min_width=110):
+                            preferences[cat] = gr.Checkbox(
+                                label=cat,
+                                value=(cat in initial_categories),
+                            )
+                # 第二行 4 个
+                with gr.Row(equal_height=True, elem_classes=["prefs-grid"]):
                     for cat in ALL_CATEGORIES[4:]:
-                        preferences[cat] = gr.Checkbox(
-                            label=cat,
-                            value=(cat in initial_categories),
-                        )
+                        with gr.Column(scale=1, min_width=110):
+                            preferences[cat] = gr.Checkbox(
+                                label=cat,
+                                value=(cat in initial_categories),
+                            )
 
+                gr.Markdown("")
                 with gr.Row():
-                    save_prefs_btn = gr.Button("保存偏好", variant="primary")
+                    with gr.Column(scale=3):
+                        pass
+                    with gr.Column(scale=1, min_width=160):
+                        save_prefs_btn = gr.Button("💾 保存偏好", variant="primary", size="lg")
+                    with gr.Column(scale=3):
+                        pass
                 prefs_result = gr.Textbox(
                     label="", interactive=False, show_label=False
                 )
@@ -1702,16 +1832,15 @@ def build_ui():
                 gr.Markdown("### 历史情报报告")
                 gr.Markdown("查看 AI 生成的每日情报分析报告。即使推送失败，报告也会保存在本地。")
 
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     _init_files = list_report_files()
                     _init_val = _init_files[0] if _init_files else None
                     report_selector = gr.Dropdown(
                         choices=_init_files,
                         value=_init_val,
                         label="选择报告",
-                        scale=4,
                     )
-                    report_refresh_btn = gr.Button("刷新列表", scale=1)
+                    report_refresh_btn = gr.Button("🔄 刷新列表", min_width=100)
                 report_status = gr.Markdown(
                     f"共 {len(_init_files)} 份报告" if _init_files else "reports 目录下暂无报告"
                 )
@@ -1751,15 +1880,16 @@ def build_ui():
                 # 隐藏状态：保存日志条目
                 log_entries_state = gr.State([])
 
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     chat_input = gr.Textbox(
-                        label="输入消息",
+                        label="",
                         placeholder="输入指令，如：帮我采集今天的情报...",
-                        scale=8,
                         show_label=False,
                     )
-                    chat_send_btn = gr.Button("发送", variant="primary", scale=1)
-                    chat_reset_btn = gr.Button("重置", scale=1)
+                    with gr.Column(scale=0, min_width=90):
+                        with gr.Row():
+                            chat_send_btn = gr.Button("🚀", variant="primary", size="sm")
+                            chat_reset_btn = gr.Button("↺", size="sm")
 
                 # 发送消息
                 chat_input.submit(
@@ -1786,11 +1916,10 @@ def build_ui():
                 )
 
         # 页脚
+        gr.Markdown("---")
         gr.Markdown(
-            "---"
-        )
-        gr.Markdown(
-            f"页面加载于 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · 如遇问题请检查 .env 配置和日志输出"
+            f"页面加载于 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · 如遇问题请检查 .env 配置和日志输出",
+            elem_classes=["footer-info"],
         )
 
     return app
