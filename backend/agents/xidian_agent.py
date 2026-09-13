@@ -2,6 +2,7 @@
 backend/agents/xidian_agent.py - XidianAgent 适配层
 继承 BaseAgent，适配原有 XidianAgent 逻辑，支持 WebSocket 日志推送
 """
+import asyncio
 import sys
 import json
 import os
@@ -52,10 +53,13 @@ class XidianAgent(BaseAgent):
                 "## 执行准则\n"
                 "1. 链路逻辑：采集 -> 处理 -> 解析 -> 合流 -> 分析 -> 推送。\n"
                 "2. 交互性：在执行耗时工具前，先口头告知用户你的计划。\n"
-                "3. 异常处理：若凭证失效（AUTH_EXPIRED），立即调用对应的扫码登录工具。\n"
+                "3. 异常处理：若工具返回 error_type 为 SESSION_EXPIRED 或 AUTH（登录失效/凭证缺失），立即调用对应的扫码登录工具（微信情报用 harvest_weread_session，超星用 harvest_chaoxing_session），登录完成后自动重跑之前中断的抓取。\n"
                 "4. 去重机制：analyze_and_push_intelligence 工具内部已完成代码级去重（基于 raw_hash 和标题精确匹配），你不需要担心重复推送问题。\n"
-                "5. 时间敏感性：当前系统时间已注入每条用户消息，如果数据采集结果与昨天一致，可能是没有新情报，不要误判为'需要补充抓取'。\n"
+                "5. 时间敏感性：当前系统时间已注入每条用户消息，如果数据采集结果与昨天一致，可能确实是没有新情报，不要误判为'需要补充抓取'。\n"
                 "6. 空数据保护：如果没有新情报，直接返回'无新情报'，不要无中生有或推送空消息。\n"
+                "7. 采集失败必须如实区分：run_wechat_scraper 返回 success=false 时严禁说成'没有新情报'，需按 error_type 说明真实原因——SESSION_EXPIRED/AUTH 需扫码；RATE_LIMITED 为限流（稍后重试即可，无需扫码）；SOURCE_UNAVAILABLE/NOT_FOUND 为数据源异常或目标号未被收录。只有 success=true 且 count=0 才是'确实没有新文章'。返回值含 failed_targets 时，需告知用户哪些公众号失败及原因。\n"
+                "8. 尊重用户的显式指令：如果用户明确要求「扫码登录」「重试」「再抓一次」，即使你判断可能无效，也必须照办——可以先说明你的判断，但不得替用户拒绝，更不得以'这样做没用'为由不执行。\n"
+                "9. 回复简洁：先给结论与关键事实（失败数量、error_type、错误码等可核验信息），再给必要说明；同一个结论只讲一次，不反复论证、不长篇铺垫。\n"
             )
         }
         self.history.append(self.system_prompt)
@@ -196,8 +200,14 @@ class XidianAgent(BaseAgent):
             else:
                 result = {"success": False, "message": f"未知任务: {task_name}"}
 
-            await self._send_log(session_id, "ok", f"✅ 任务完成: {task_name}")
-            return {"success": True, "data": result}
+            # 任务结果如实回传：失败不得再被包装成「任务完成 + success=True」
+            ok = bool(result.get("success")) if isinstance(result, dict) else bool(result)
+            if ok:
+                await self._send_log(session_id, "ok", f"✅ 任务完成: {task_name}")
+            else:
+                msg = (result.get("message") if isinstance(result, dict) else "") or ""
+                await self._send_log(session_id, "err", f"⚠️ 任务未成功: {task_name} {msg}")
+            return {"success": ok, "data": result}
         except Exception as e:
             logger.error(f"任务执行失败: {e}", exc_info=True)
             await self._send_log(session_id, "err", f"❌ 任务失败: {str(e)}")
@@ -220,6 +230,48 @@ class XidianAgent(BaseAgent):
         except Exception as e:
             logger.warning(f"推送日志失败: {e}")
 
+    async def _report_wechat_result(self, session_id: str, result):
+        """
+        如实上报微信采集结果。
+
+        旧实现直接丢弃 run_scraper_flow 的返回值，导致「抓取失败」与「确实没有新文章」
+        在界面上完全无法区分（静默断流）。这里按 error_type 分类上报，失败必须可见。
+        """
+        if not isinstance(result, dict):
+            await self._send_log(session_id, "err", "❌ 微信采集返回格式异常，无法判定结果")
+            return
+
+        if result.get("success"):
+            count = result.get("count", 0)
+            if count:
+                await self._send_log(session_id, "status", f"✅ 微信情报取回 {count} 篇")
+            else:
+                await self._send_log(
+                    session_id, "status",
+                    "ℹ️ " + (result.get("message") or "微信通道正常，本轮无新文章"))
+
+            failed = result.get("failed_targets") or []
+            if failed:
+                detail = "、".join(
+                    "%s(%s)" % (i.get("target"), i.get("status")) for i in failed[:5])
+                await self._send_log(
+                    session_id, "err",
+                    f"⚠️ 其中 {len(failed)} 个公众号抓取失败: {detail}")
+            return
+
+        err = result.get("error_type") or "ERROR"
+        msg = result.get("message") or "微信采集失败"
+        if err in ("SESSION_EXPIRED", "AUTH"):
+            await self._send_log(
+                session_id, "err",
+                f"❌ 微信登录态失效，需重新扫码登录（harvest_weread_session）: {msg}")
+        elif err == "RATE_LIMITED":
+            await self._send_log(
+                session_id, "err",
+                f"⚠️ 微信数据源限流，稍后重试即可、无需重新扫码: {msg}")
+        else:
+            await self._send_log(session_id, "err", f"❌ 微信采集失败({err}): {msg}")
+
     async def _run_full_flow(self, session_id: str):
         """执行完整流程（异步）"""
         from src.collectors.scrapers.scraper import Scraper
@@ -230,35 +282,50 @@ class XidianAgent(BaseAgent):
         from src.processors.mergers.final_merger import FinalMerger
         from src.agent.analyzer import run_analysis_flow
 
+        # 所有同步重活（含 Playwright 同步 API、requests 长抓取）都必须丢到线程池：
+        #   1) Playwright Sync API 在 asyncio 事件循环线程里调用会直接抛错
+        #      （"It looks like you are using Playwright Sync API inside the asyncio loop"），
+        #      而「微信登录态自愈」需要拉起浏览器，一定会踩到；
+        #   2) 采集/分析本身耗时数分钟，同步执行会把整个后端的 WebSocket 与 HTTP 一起卡死。
+        loop = asyncio.get_running_loop()
+
         def _progress_callback(current, total, msg):
-            # 在非异步上下文中调用，需要通过事件循环
-            import asyncio
+            # 该回调运行在工作线程中，必须用 run_coroutine_threadsafe 投递回主事件循环
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        self._send_log(session_id, "tool", f"📊 ({current}/{total}) {msg}"),
-                        loop
-                    )
+                asyncio.run_coroutine_threadsafe(
+                    self._send_log(session_id, "tool", f"📊 ({current}/{total}) {msg}"),
+                    loop
+                )
             except Exception:
                 pass
 
         await self._send_log(session_id, "status", "📡 开始采集...")
-        Scraper().fetch_and_save(progress_callback=_progress_callback)
-        WechatScraper().run_scraper_flow(progress_callback=_progress_callback)
+        await asyncio.to_thread(Scraper().fetch_and_save, progress_callback=_progress_callback)
+        # 微信采集结果必须上报：失败要可见，不能与「确实没有新文章」混为一谈
+        wx_result = await asyncio.to_thread(
+            WechatScraper().run_scraper_flow, progress_callback=_progress_callback)
+        await self._report_wechat_result(session_id, wx_result)
 
         await self._send_log(session_id, "status", "🧹 开始处理...")
-        WechatParser().run_parser(progress_callback=_progress_callback)
-        DataProcessor().run(progress_callback=_progress_callback)
-        ContentExtractor().clean_and_refine(progress_callback=_progress_callback)
-        FinalMerger().merge_intelligence(progress_callback=_progress_callback)
+        await asyncio.to_thread(WechatParser().run_parser, progress_callback=_progress_callback)
+        await asyncio.to_thread(DataProcessor().run, progress_callback=_progress_callback)
+        await asyncio.to_thread(ContentExtractor().clean_and_refine, progress_callback=_progress_callback)
+        await asyncio.to_thread(FinalMerger().merge_intelligence, progress_callback=_progress_callback)
 
         await self._send_log(session_id, "status", "🧠 开始 AI 分析...")
-        result = run_analysis_flow(progress_callback=_progress_callback)
+        result = await asyncio.to_thread(run_analysis_flow, progress_callback=_progress_callback)
 
         # 完整流程结束后，清理上下文（防止 Token 滚雪球）
         self._trim_history(max_rounds=3)
 
+        # 微信采集失败不应中断整轮（超星数据仍可能有效），但必须让前端/LLM 看得到失败原因，
+        # 否则「抓取失败」会再次被「分析完成」掩盖
+        if isinstance(result, dict) and isinstance(wx_result, dict) and not wx_result.get("success"):
+            result = dict(result)
+            result["wechat_error"] = {
+                "error_type": wx_result.get("error_type"),
+                "message": wx_result.get("message"),
+            }
         return result
 
     async def _run_scrape(self, session_id: str):
@@ -267,6 +334,16 @@ class XidianAgent(BaseAgent):
         from src.collectors.scrapers.wechat_scraper import WechatScraper
 
         await self._send_log(session_id, "status", "📡 开始采集...")
-        Scraper().fetch_and_save()
-        WechatScraper().run_scraper_flow()
-        return {"message": "采集完成"}
+        # 同 _run_full_flow：同步长任务必须放线程池，否则 Playwright Sync API 会直接报错
+        await asyncio.to_thread(Scraper().fetch_and_save)
+        wx_result = await asyncio.to_thread(WechatScraper().run_scraper_flow)
+        await self._report_wechat_result(session_id, wx_result)
+
+        # 采集阶段的结果如实回传：微信失败不算「采集完成」
+        wx_ok = isinstance(wx_result, dict) and bool(wx_result.get("success"))
+        wx_msg = (wx_result or {}).get("message") if isinstance(wx_result, dict) else ""
+        return {
+            "success": wx_ok,
+            "message": wx_msg or ("采集完成" if wx_ok else "微信采集失败"),
+            "wechat": wx_result,
+        }

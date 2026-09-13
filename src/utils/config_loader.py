@@ -8,9 +8,17 @@ DEFAULT_CONFIG = {
         "temperature": 0.1,
     },
     "collectors": {
+        # 微信来源编排（2026-07 原公众号后台接口被官方关闭后，主通道切换为微信读书）
         "wechat": {
-            "delay_range": [5, 8],
+            # 公众号切换间隔（秒）：来源切换比纯接口调用更敏感，下限比旧值 5 秒保守
+            "delay_range": [8, 12],
             "fetch_count": 5,
+            # 来源优先级：每轮按此顺序尝试，前一个通道拿不到数据才降级到下一个
+            "source_priority": ["weread"],
+            # 原公众号后台通道：接口已被官方精准软拒绝，保留代码以便恢复时切回，默认不发起无效请求
+            "legacy_backend_enabled": False,
+            # 备用公开索引兜底（反爬敏感），仅在主通道未收录目标号时按需启用
+            "sogou_fallback_enabled": False,
             "targets": [
                 "西小电星球",
                 "西电社团",
@@ -18,7 +26,21 @@ DEFAULT_CONFIG = {
                 "西安电子科技大学",
                 "西电青年",
             ],
-        }
+        },
+        # 微信读书通道（当前主数据源）
+        "weread": {
+            # 单号最多翻几页：单页回执固定 15 条，页码越深相关度越低
+            "max_pages": 2,
+            # 同号翻页之间的等待区间（秒）
+            "page_interval": [3, 5],
+            # 单次请求超时（秒）与重试次数，遵循「超时要宽容」原则
+            "timeout": 30,
+            "retries": 3,
+            # 触发限流后的递增退避间隔（秒）
+            "rate_limit_backoff": [10, 30, 60],
+            # 监控目标：留空表示复用 collectors.wechat.targets
+            "targets": [],
+        },
     },
     "pusher": {
         "enable_console_report": True,

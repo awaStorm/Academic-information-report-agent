@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from backend.api.v1 import agents, config_api as config_router, dashboard_api as dashboard, reports_api as reports, preferences_api as preferences
+from backend.api.v1 import agents, config_api as config_router, dashboard_api as dashboard, reports_api as reports, preferences_api as preferences, ctf as ctf_router
 from backend.ws.connection_manager import manager as ws_manager
 from backend.core.agent_registry import registry
 from backend.services.scheduler_service import SchedulerService
@@ -71,6 +71,7 @@ app.include_router(config_router.router, prefix="/api/v1/config", tags=["配置�
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["仪表盘"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["报告管理"])
 app.include_router(preferences.router, prefix="/api/v1/preferences", tags=["偏好设置"])
+app.include_router(ctf_router.router, prefix="/api/v1/ctf", tags=["CTF时间表"])
 
 
 # WebSocket 路由：实时日志流

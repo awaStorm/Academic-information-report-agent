@@ -249,3 +249,9 @@ node_modules/
 # 临时标记文件
 _title_keep.bat
 task_human.txt
+
+# 调试探针产物（一次性排查脚本、原始回执、截图与 DOM 快照，勿提交）
+_probe_*
+_shot_*
+_snap_*
+.playwright-cli/

@@ -90,7 +90,7 @@ async def get_config():
         "enable_wecom": CONFIG.get("pusher", {}).get("enable_wecom", True),
         "enable_console_report": CONFIG.get("pusher", {}).get("enable_console_report", True),
         "fetch_count": CONFIG.get("collectors", {}).get("wechat", {}).get("fetch_count", 5),
-        "delay_range": CONFIG.get("collectors", {}).get("wechat", {}).get("delay_range", [5, 8]),
+        "delay_range": CONFIG.get("collectors", {}).get("wechat", {}).get("delay_range", [8, 12]),
         "wechat_targets": CONFIG.get("collectors", {}).get("wechat", {}).get("targets", []),
         "scheduler_enabled": CONFIG.get("scheduler", {}).get("enabled", False),
         "run_times": CONFIG.get("scheduler", {}).get("run_times", ["08:00"]),

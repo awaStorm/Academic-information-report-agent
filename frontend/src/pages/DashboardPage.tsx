@@ -115,7 +115,15 @@ const DashboardPage: React.FC = () => {
                 <span className={`text-xs px-2 py-0.5 rounded ${categoryColors[record.category] || "text-gray-400 bg-gray-400/10"}`}>
                   {record.category}
                 </span>
-                <div className={`w-2 h-2 rounded-full mt-1 ${record.status === "pushed" ? "bg-green-500" : "bg-amber-500"}`} />
+                <div className={`w-2 h-2 rounded-full mt-1 ${
+                  record.status === "pushed" ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.4)]" :
+                  record.status === "failed" ? "bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.4)]" :
+                  "bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.4)]"
+                }`} title={
+                  record.status === "pushed" ? "已推送" :
+                  record.status === "failed" ? "推送失败" :
+                  "等待推送"
+                } />
               </div>
               <p className="text-xs text-gray-500 line-clamp-2">{record.brief}</p>
             </div>

@@ -334,7 +334,19 @@ def run_analysis_flow(progress_callback=None):
         _progress(2, "正在数据库去重过滤...")
         final_pushed_list = []
 
+        # 批内跨来源去重：同一篇文章若被多个来源通道同时返回，其 link / raw_hash 可能不同
+        # （不同通道给出的 URL 规范形式不一致），但 raw_key 相同。这里按「raw_key → 清洗标题」
+        # 做一次批内归并。注意：**不改动 db 记忆的 hash 语义**（仍然只用 raw_hash / 标题哈希），
+        # 否则存量记录与新记录对不上，反而会造成重复推送。
+        seen_in_batch = set()
+
         for item in pushed_list:
+            batch_key = item.get('raw_key') or clean_title(item.get('title', ''))
+            if batch_key in seen_in_batch:
+                print(f"⏭️  跳过本轮重复的情报（跨来源）: {item['title']}")
+                continue
+            seen_in_batch.add(batch_key)
+
             # 优先使用 raw_hash（原始数据阶段生成，稳定不变）
             item_hash = item.get('raw_hash')
             if not item_hash:

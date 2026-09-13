@@ -10,12 +10,14 @@ import {
   Heart,
   FileText,
   BotMessageSquare,
+  Trophy,
 } from "lucide-react";
 
 const navItems = [
   { to: "/dashboard", label: "情报仪表盘", icon: LayoutDashboard },
   { to: "/preferences", label: "偏好设置", icon: Heart },
   { to: "/reports", label: "情报报告", icon: FileText },
+  { to: "/ctf", label: "CTF 时间表", icon: Trophy },
   { to: "/agents/xidian/chat", label: "Agent 对话", icon: BotMessageSquare },
   { to: "/config", label: "配置面板", icon: Settings },
 ];

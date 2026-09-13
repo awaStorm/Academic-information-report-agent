@@ -2,6 +2,7 @@
 
 from src.collectors.sessions.session_harvester import SessionHarvester
 from src.collectors.sessions.wechat_harvester import WechatHarvester
+from src.collectors.sessions.weread_harvester import WereadHarvester
 from src.collectors.scrapers.scraper import run_scraper_flow, Scraper
 from src.collectors.scrapers.wechat_scraper import run_wechat_scraper_flow, WechatScraper
 from src.processors.data_processor import DataProcessor
@@ -30,8 +31,20 @@ TOOLS_METADATA = [
     {
         "type": "function",
         "function": {
+            "name": "harvest_weread_session",
+            "description": "获取或刷新微信读书登录凭证（当前微信情报主数据源）。会**优先复用持久化档案里已有的登录态做静默续期，多数情况无需人工扫码**（服务端会轮换 wr_skey/wr_gid，落盘凭证会「看起来还在、实际已超时」，续期即可恢复）。仅当档案内登录态也失效时，才会调起有头浏览器等待用户扫码（等待上限约 10 分钟）。当 run_wechat_scraper 返回 error_type 为 SESSION_EXPIRED 或 AUTH 时调用；调用完成后**必须自动重新执行之前中断的抓取**，不要等待用户再次输入。注意：限流（RATE_LIMITED）时不要调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "harvest_wechat_session",
-            "description": "获取微信公众平台登录凭证（Token 和 Cookies）。当微信爬虫报凭证过期或需要初始化登录环境时调用。此操作需要人工扫码。",
+            "description": "获取微信公众平台后台登录凭证（legacy 备用通道）。注意：该后台接口自 2026-07 起已无法查询其他公众号，仅作接口恢复时备用；日常抓取微信情报无需调用它。",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -43,7 +56,7 @@ TOOLS_METADATA = [
         "type": "function",
         "function": {
             "name": "run_chaoxing_scraper",
-            "description": "抓取超星校园通知列表。当需要更新校园情报数据时调用。如果返回 AUTH_EXPIRED，说明需要先调用扫码工具。",
+            "description": "抓取超星校园通知列表。当需要更新校园情报数据时调用。如果返回的 error_type 为 AUTH_EXPIRED 或 SESSION_EXPIRED，说明需要先调用 harvest_chaoxing_session 扫码登录。",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -55,7 +68,7 @@ TOOLS_METADATA = [
         "type": "function",
         "function": {
             "name": "run_wechat_scraper",
-            "description": "抓取微信公众号情报。若用户提到特定公众号（如'西电物理'），请务必将全名传入 extra_query 参数以执行定向扩充抓取。",
+            "description": "抓取微信公众号情报（主数据源：微信读书通道）。若用户提到特定公众号（如'西电物理'），请务必将全名传入 extra_query 参数以执行定向扩充抓取。返回值必须按 error_type 解读，严禁把抓取失败说成'没有新情报'：success=true 且 count>0 = 正常取到文章；success=true 且 count=0 = 通道正常但目标号确实没有文章（只有这一种才是'没有新情报'）；success=false 时，SESSION_EXPIRED/AUTH 表示登录态失效且**工具已自动尝试静默续期仍未成功**，此时才需调用 harvest_weread_session 扫码；RATE_LIMITED 表示限流（告知用户稍后重试即可、无需扫码）；SOURCE_UNAVAILABLE 表示数据源确实不可用（通道超时/HTTP 异常）；NOT_FOUND 表示目标号未被收录或本次检索无结果（属正常情况，不要报成故障）。若返回值含 failed_targets，说明部分公众号本轮失败，需一并如实告知用户。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -176,6 +189,7 @@ TOOLS_METADATA = [
 # 这里的 key 必须与上面的 "name" 字段完全一致
 TOOL_MAP = {
     "harvest_chaoxing_session": lambda: SessionHarvester().run_harvest(),
+    "harvest_weread_session": lambda: WereadHarvester().run_harvest(),
     "harvest_wechat_session": lambda: WechatHarvester().run_harvest(),
     "run_chaoxing_scraper": lambda progress_callback=None: Scraper().fetch_and_save(progress_callback=progress_callback),
     "run_wechat_scraper": lambda extra_query=None, progress_callback=None: run_wechat_scraper_flow(extra_query=extra_query, progress_callback=progress_callback),
