@@ -43,6 +43,8 @@
 - `tools_config.py` 中 `run_wechat_scraper` / `harvest_weread_session` 描述同步更新：明确「`SESSION_EXPIRED` 表示**已自动尝试静默续期仍未成功**，此时才需扫码」「`NOT_FOUND` 属正常情况、不要报成故障」。
 - 提示词新增两条约束：**尊重用户显式指令**（用户明确要求扫码/重试时必须照办，不得以「这样做没用」为由替用户拒绝——本次会话中用户说「扫码登录看看」被 Agent 拒绝；`agent_core.py` 第 6 条 / `backend/agents/xidian_agent.py` 第 8 条）与**回复简洁**（先给结论与关键事实——失败数量、`error_type`、错误码等可核验信息，再给必要说明；同一结论只讲一次，不反复论证、不长篇铺垫；`agent_core.py` 第 7 条 / `backend/agents/xidian_agent.py` 第 9 条）。
 
+- `README.md` 新增「接口变更（v2.1）」章节：逐项说明 Agent 工具接口、采集编排层返回契约、新增模块公开接口、配置项、REST API 与前端路由的变化，并显式标注**破坏性变更**（失败路径不再返回 `success=true/count=0`，调用方须改按 `error_type` 判断）；版本说明同步更新至 v2.1.0。
+
 ### Removed
 - 清理调试遗留物：删除根目录 47 个一次性探针产物（`_probe_*.py` 排查脚本、`_probe_*.json` 原始回执、`_probe_*.log` 运行日志、`_shot_*.png` 页面截图、`_snap_*.yaml` DOM 快照、`_weread_trial_run.log`，合计约 1.18 MB），以及 `.playwright-cli/` 会话缓存目录。清理前已全库检索确认**无任何正式代码引用**这些文件；其中 `_probe_browser_state.json` / `_probe_weread_*_result.json` 含登录态快照，一并清除。`_title_keep.bat` 为 2026-06-27 的既有文件、非本次遗留，予以保留。
 - `.gitignore` 新增 `_probe_*` / `_shot_*` / `_snap_*` / `.playwright-cli/` 忽略规则——原先只忽略了 `.playwright/`，导致上述产物每次调试都会污染 `git status`。
