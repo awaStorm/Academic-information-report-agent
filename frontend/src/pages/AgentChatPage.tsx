@@ -1,56 +1,33 @@
 /**
  * frontend/src/pages/AgentChatPage.tsx - Agent 对话页面（终端风格）
- * 支持 WebSocket 实时日志流
+ *
+ * WebSocket 由应用级管理器（api/websocket.ts）持有：
+ * - 换页不断开、断线自动重连（此前绑定在组件上，换页即断）
+ * - 日志缓冲在管理器中，换页返回后自动回放
+ * - 本组件卸载时只取消订阅，绝不关闭连接
  */
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Send, RotateCcw } from "lucide-react";
-
-interface LogEntry {
-  cls: string;
-  html: string;
-}
-
-const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8138/ws/logs";
+import api from "../api/client";
+import { wsManager, type LogEntry } from "../api/websocket";
 
 const AgentChatPage: React.FC = () => {
   const [input, setInput] = useState("");
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [connected, setConnected] = useState(false);
-  const [sessionId] = useState(() => `session_${Date.now()}`);
+  const [logs, setLogs] = useState<LogEntry[]>(() => wsManager.getBuffer());
+  const [connected, setConnected] = useState(wsManager.isConnected);
+  const sessionId = wsManager.getSessionId();
   const terminalRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
 
-  // 连接 WebSocket
+  // 订阅全局 WS：新日志 / 连接状态（幂等连接，已连接时跳过）
   useEffect(() => {
-    const ws = new WebSocket(`${WS_URL}?session_id=${sessionId}`);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setConnected(true);
-      appendLog("status", `🔌 已连接到后端 [${new Date().toLocaleTimeString()}]`);
+    wsManager.connect(sessionId);
+    const offLog = wsManager.onLog((entry) => setLogs((prev) => [...prev, entry]));
+    const offConn = wsManager.onConnectionChange(setConnected);
+    setConnected(wsManager.isConnected);
+    return () => {
+      offLog();
+      offConn();
     };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "log" && msg.data) {
-          appendLog(msg.data.cls, msg.data.html);
-        }
-      } catch (e) {
-        console.error("WebSocket 消息解析失败:", e);
-      }
-    };
-
-    ws.onclose = () => {
-      setConnected(false);
-      appendLog("warn", "🔌 连接已断开");
-    };
-
-    ws.onerror = () => {
-      appendLog("err", "❌ WebSocket 连接错误");
-    };
-
-    return () => { ws.close(); };
   }, [sessionId]);
 
   // 自动滚动到底部
@@ -66,13 +43,17 @@ const AgentChatPage: React.FC = () => {
 
   const sendMessage = useCallback(() => {
     if (!input.trim() || !connected) return;
-    appendLog("user", `👤 [${new Date().toLocaleTimeString()}] ${input}`);
-    // 通过 REST API 发送，WebSocket 是主要的响应通道
-    fetch(`http://localhost:8138/api/v1/agents/xidian/chat?user_input=${encodeURIComponent(input)}&session_id=${sessionId}`, {
-      method: "POST",
-    })
-      .then(async (res) => {
-        const data = await res.json();
+    const text = input;
+    setInput("");
+    appendLog("user", `👤 [${new Date().toLocaleTimeString()}] ${text}`);
+    // 通过 REST API 发送（LLM 任务可达数分钟，延长超时避免前端中断），
+    // WebSocket 仍是实时日志主通道
+    api.post<{ success: boolean; response?: string; message?: string }>(
+      "/api/v1/agents/xidian/chat",
+      null,
+      { params: { user_input: text, session_id: sessionId }, timeout: 600000 }
+    )
+      .then((data) => {
         // 降级：如果 WebSocket 日志未到达，直接用 REST 响应展示
         if (data.success && data.response) {
           // 用短延迟确保 WebSocket 消息先到达；如果 1s 后还没收到，则降级展示
@@ -91,12 +72,11 @@ const AgentChatPage: React.FC = () => {
         }
       })
       .catch(e => appendLog("err", `❌ 发送失败: ${e.message}`));
-    setInput("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, connected, sessionId]);
 
   const resetChat = () => {
     setLogs([]);
+    wsManager.clearBuffer(sessionId);
     appendLog("status", `🔄 终端已重置 [${new Date().toLocaleTimeString()}]`);
   };
 

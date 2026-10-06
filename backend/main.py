@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from backend.api.v1 import agents, config_api as config_router, dashboard_api as dashboard, reports_api as reports, preferences_api as preferences, ctf as ctf_router
+from backend.api.v1 import agents, config_api as config_router, dashboard_api as dashboard, reports_api as reports, preferences_api as preferences, ctf as ctf_router, calendar_api as calendar
 from backend.ws.connection_manager import manager as ws_manager
 from backend.core.agent_registry import registry
 from backend.services.scheduler_service import SchedulerService
@@ -41,6 +41,19 @@ scheduler_service = SchedulerService()
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("🚀 西电校园情报助手后端启动中...")
+    # 启动自检：微信读书扫码环境（持久化档案 vs Playwright 自带 Chromium）版本一致性。
+    # 只读、不启动浏览器、不修改任何文件；错配时提前告警，避免等到用户要扫码时才失败，
+    # 又因 Playwright 只报 "Target page, context or browser has been closed" 而误判成
+    # 「档案被锁」或显卡问题（2026-10-05 就是这么误判的）。
+    try:
+        from src.collectors.sessions.weread_harvester import WereadHarvester
+        env = WereadHarvester.diagnose_browser_env()
+        if env.get("status") in ("auto_align", "needs_rebuild"):
+            logger.warning("⚠️ 微信读书扫码环境自检: %s", env.get("message"))
+        else:
+            logger.info("✅ 微信读书扫码环境自检: %s", env.get("message"))
+    except Exception as e:  # 自检绝不能影响后端启动
+        logger.warning("微信读书扫码环境自检跳过（%s）", e)
     # 启动时：初始化调度器
     scheduler_service.start()
     yield
@@ -56,10 +69,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS 配置（开发环境允许所有来源，生产环境需限制）
+# CORS 配置：默认仅允许本机前端来源；部署时通过 .env 的 ALLOWED_ORIGINS 覆盖（逗号分隔）
+_allowed_origins = [
+    o.strip() for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:7860,http://127.0.0.1:7860",
+    ).split(",") if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境改为前端域名
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -72,6 +91,7 @@ app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["仪表�
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["报告管理"])
 app.include_router(preferences.router, prefix="/api/v1/preferences", tags=["偏好设置"])
 app.include_router(ctf_router.router, prefix="/api/v1/ctf", tags=["CTF时间表"])
+app.include_router(calendar.router, prefix="/api/v1/calendar", tags=["事件日历"])
 
 
 # WebSocket 路由：实时日志流
@@ -87,8 +107,10 @@ async def websocket_logs(websocket: WebSocket, session_id: str = "default"):
                 logger.info(f"收到中断请求: {session_id}")
                 ws_manager.mark_interrupt(session_id)
     except WebSocketDisconnect:
-        ws_manager.disconnect(session_id)
         logger.info(f"WebSocket 断开: {session_id}")
+    finally:
+        # finally 保证任何异常路径（含 receive_json 解析失败）都清理连接记录，避免泄漏
+        ws_manager.disconnect(session_id, websocket)
 
 
 @app.get("/")

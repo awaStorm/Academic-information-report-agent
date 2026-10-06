@@ -11,6 +11,7 @@ import {
   FileText,
   BotMessageSquare,
   Trophy,
+  CalendarDays,
 } from "lucide-react";
 
 const navItems = [
@@ -18,6 +19,7 @@ const navItems = [
   { to: "/preferences", label: "偏好设置", icon: Heart },
   { to: "/reports", label: "情报报告", icon: FileText },
   { to: "/ctf", label: "CTF 时间表", icon: Trophy },
+  { to: "/calendar", label: "事件日历", icon: CalendarDays },
   { to: "/agents/xidian/chat", label: "Agent 对话", icon: BotMessageSquare },
   { to: "/config", label: "配置面板", icon: Settings },
 ];

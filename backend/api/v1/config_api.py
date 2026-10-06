@@ -37,6 +37,12 @@ class ConfigUpdate(BaseModel):
     run_times: Optional[List[str]] = None
     failure_alert_threshold: Optional[int] = None
     dashboard_page_size: Optional[int] = None
+    # 多模态识图
+    multimodal_enabled: Optional[bool] = None
+    multimodal_api_key: Optional[str] = None
+    multimodal_base_url: Optional[str] = None
+    multimodal_model: Optional[str] = None
+    max_images: Optional[int] = None
 
 
 def _get_project_root():
@@ -96,6 +102,12 @@ async def get_config():
         "run_times": CONFIG.get("scheduler", {}).get("run_times", ["08:00"]),
         "failure_alert_threshold": CONFIG.get("scheduler", {}).get("failure_alert_threshold", 3),
         "dashboard_page_size": CONFIG.get("web_ui", {}).get("dashboard_page_size", 20),
+        # 多模态识图配置
+        "multimodal_enabled": CONFIG.get("analysis", {}).get("multimodal", {}).get("enabled", False),
+        "multimodal_api_key": _mask(CONFIG.get("analysis", {}).get("multimodal", {}).get("api_key", "")),
+        "multimodal_base_url": CONFIG.get("analysis", {}).get("multimodal", {}).get("base_url", ""),
+        "multimodal_model": CONFIG.get("analysis", {}).get("multimodal", {}).get("model", ""),
+        "max_images": CONFIG.get("analysis", {}).get("multimodal", {}).get("max_images", 3),
     }}
 
 
@@ -128,6 +140,22 @@ async def update_config(config: ConfigUpdate):
             "temperature": data.get("temperature", CONFIG.get("analysis", {}).get("temperature", 0.1)),
             "max_tokens": data.get("max_tokens", CONFIG.get("analysis", {}).get("max_tokens", 20000)),
         }
+    if any(k in data for k in ("multimodal_enabled", "multimodal_api_key", "multimodal_base_url", "multimodal_model", "max_images")):
+        cur_mm = CONFIG.get("analysis", {}).get("multimodal", {}) or {}
+        mm_cfg = {
+            "enabled": data.get("multimodal_enabled", cur_mm.get("enabled", False)),
+            "api_key": data.get("multimodal_api_key", cur_mm.get("api_key", "")),
+            "base_url": data.get("multimodal_base_url", cur_mm.get("base_url", "")),
+            "model": data.get("multimodal_model", cur_mm.get("model", "")),
+            "max_images": data.get("max_images", cur_mm.get("max_images", 3)),
+        }
+        # api_key 脱敏值 "***" 不覆盖原值
+        if mm_cfg["api_key"] == "***":
+            mm_cfg["api_key"] = cur_mm.get("api_key", "")
+        # 合并到 analysis
+        analysis = yaml_settings.get("analysis", {})
+        analysis["multimodal"] = mm_cfg
+        yaml_settings["analysis"] = analysis
     if any(k in data for k in ("fetch_count", "delay_min", "delay_max", "wechat_targets")):
         yaml_settings["collectors"] = {
             "wechat": {

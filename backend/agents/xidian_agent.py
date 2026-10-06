@@ -14,7 +14,6 @@ from datetime import datetime
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,6 +22,12 @@ from backend.core.base_agent import BaseAgent
 from backend.ws.connection_manager import manager
 from tools_config import TOOLS_METADATA, execute_tool
 from src.utils.config_loader import CONFIG
+from src.utils.llm_client import (
+    build_llm_client,
+    call_with_retry,
+    describe_llm_error,
+    is_connection_error,
+)
 
 logger = logging.getLogger("backend.xidian_agent")
 
@@ -36,11 +41,16 @@ class XidianAgent(BaseAgent):
         if not api_key:
             raise ValueError("LLM_API_KEY 未设置")
 
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        # 统一客户端口径：默认绕开 Windows 系统代理（Clash 等节点抖动会以
+        # SSL UNEXPECTED_EOF 打断整轮对话），详见 src/utils/llm_client.py
+        self.client = build_llm_client(api_key, base_url)
         self.model = CONFIG.get("analysis", {}).get("model_name", "")
         self.temperature = CONFIG.get("analysis", {}).get("temperature", 0.1)
         self.max_tokens = CONFIG.get("analysis", {}).get("max_tokens", 20000)
-        self.history: List[Dict] = []
+        # session_id -> 消息历史（会话间相互隔离，避免多窗口/多用户上下文污染）
+        self._histories: Dict[str, List] = {}
+        # 工具调用轮次上限：防止 LLM 陷入「扫码→重抓→仍失败→再扫码」无限循环烧 token
+        self.MAX_TOOL_ROUNDS = 15
         self._init_system_prompt()
         logger.info(f"✅ XidianAgent 初始化完成，模型: {self.model}")
 
@@ -62,24 +72,41 @@ class XidianAgent(BaseAgent):
                 "9. 回复简洁：先给结论与关键事实（失败数量、error_type、错误码等可核验信息），再给必要说明；同一个结论只讲一次，不反复论证、不长篇铺垫。\n"
             )
         }
-        self.history.append(self.system_prompt)
 
-    def _trim_history(self, max_rounds: int = 3):
+    def _get_history(self, session_id: str) -> List:
+        """获取指定会话的消息历史（首次访问时注入系统提示词）"""
+        if session_id not in self._histories:
+            self._histories[session_id] = [dict(self.system_prompt)]
+        return self._histories[session_id]
+
+    def _trim_history(self, session_id: str, max_rounds: int = 3):
         """
         裁剪历史记录，只保留 system_prompt + 最近 max_rounds 轮对话
         防止上下文滚雪球导致 Token 稀释和 Agent 失焦
+
+        裁剪点必须落在 user 消息上：assistant(tool_calls) 与 role:"tool" 消息
+        永远成对出现在同一轮内，从 user 消息边界切分可保证配对完整；
+        若按消息条数截断，会产生孤儿 tool 消息，导致下一次 LLM 调用直接 400。
         """
-        if len(self.history) <= 1:
+        history = self._histories.get(session_id)
+        if not history or len(history) <= 1:
             return
 
-        # 第一条是 system_prompt，必须保留
-        system_prompt = self.history[0:1]
+        rest = history[1:]  # 跳过 system_prompt
 
-        # 保留最近 max_rounds 轮（每轮包括 user + assistant）
-        recent_rounds = self.history[-(max_rounds * 2):]
+        def _role(m):
+            return m.get("role") if isinstance(m, dict) else getattr(m, "role", None)
 
-        self.history = system_prompt + recent_rounds
-        logger.info(f"🧹 上下文清理：{len(self.history)} 条消息（保留 system_prompt + 最近 {max_rounds} 轮）")
+        user_indices = [i for i, m in enumerate(rest) if _role(m) == "user"]
+        if len(user_indices) <= max_rounds:
+            return  # 轮次未超限，无需裁剪
+
+        cut = user_indices[-max_rounds]  # 保留最近 max_rounds 轮，从 user 消息处切分
+        self._histories[session_id] = history[0:1] + rest[cut:]
+        logger.info(
+            f"🧹 上下文清理：session={session_id} 保留 system_prompt + 最近 "
+            f"{max_rounds} 轮（共 {len(self._histories[session_id])} 条消息）"
+        )
 
     def get_name(self) -> str:
         return "xidian"
@@ -94,20 +121,44 @@ class XidianAgent(BaseAgent):
         return TOOLS_METADATA
 
     async def chat(self, user_input: str, session_id: str = "default") -> Dict[str, Any]:
-        """处理对话（支持多轮工具调用 Agentic Loop）"""
+        """处理对话（支持多轮工具调用 Agentic Loop，会话间历史隔离）"""
         await self._send_log(session_id, "user", f"👤 {user_input}")
 
         current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         timed_input = f"【当前系统时间：{current_time_str}】\n用户指令：{user_input}"
-        self.history.append({"role": "user", "content": timed_input})
+        history = self._get_history(session_id)
+        history.append({"role": "user", "content": timed_input})
 
         # Token 累计统计
         total_tokens = {"prompt": 0, "completion": 0, "total": 0}
+        tool_rounds = 0
+        loop = asyncio.get_running_loop()
+
+        def _on_llm_retry(attempt, total, delay, err):
+            """连接类错误重试时把进度推给前端，避免界面像卡死一样"""
+            logger.warning("LLM 请求失败（第 %d/%d 次），%.1fs 后重试：%s",
+                           attempt, total, delay, str(err)[:160])
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._send_log(
+                        session_id, "warn",
+                        f"⚠️ LLM 请求失败（第 {attempt}/{total} 次），"
+                        f"{delay:.0f}s 后自动重试：{str(err)[:100]}"),
+                    loop)
+            except Exception:
+                pass
 
         while True:
-            response = self.client.chat.completions.create(
+            # LLM 请求是同步 SDK（一次可达数十秒），必须丢进线程池：
+            # 否则等待模型响应期间整个后端的 HTTP/WebSocket 一起卡死。
+            # call_with_retry：连接类错误（网络/代理节点抖动）自动指数退避重试，
+            # 否则一次瞬时抖动就会把整轮对话打成 500。
+            response = await asyncio.to_thread(
+                call_with_retry,
+                self.client.chat.completions.create,
+                on_retry=_on_llm_retry,
                 model=self.model,
-                messages=self.history,
+                messages=history,
                 tools=TOOLS_METADATA,
                 tool_choice="auto",
                 temperature=self.temperature,
@@ -129,7 +180,7 @@ class XidianAgent(BaseAgent):
                 break
 
             response_msg = response.choices[0].message
-            self.history.append(response_msg)
+            history.append(response_msg)
 
             # 推送文本回复
             if response_msg.content:
@@ -137,36 +188,55 @@ class XidianAgent(BaseAgent):
 
             # 检查是否需要调用工具
             if not response_msg.tool_calls:
-                # 由 Agent 决策是否退出
-                if response_msg.content and any(word in response_msg.content for word in ["再见", "退出"]):
+                # 由 Agent 决策是否退出（仅短回复中的退出词才判定，避免报告正文含该词导致误退出）
+                if (response_msg.content and len(response_msg.content) < 50
+                        and any(word in response_msg.content for word in ["再见", "退出"])):
                     return {"success": True, "response": response_msg.content, "exit": True, "tokens": total_tokens}
                 break
+
+            # 工具调用轮次保护：超限后强制收敛为文字总结，防止无限循环烧 token
+            tool_rounds += 1
+            if tool_rounds > self.MAX_TOOL_ROUNDS:
+                summary = await self._force_summarize(session_id, history, total_tokens)
+                return {
+                    "success": True,
+                    "response": summary,
+                    "tokens": total_tokens,
+                    "hit_tool_limit": True,
+                }
 
             # 执行工具调用
             for tool_call in response_msg.tool_calls:
                 function_name = tool_call.function.name
                 args_str = tool_call.function.arguments
-                args = json.loads(args_str) if args_str else {}
-
-                await self._send_log(session_id, "tool",
-                    f"🛠️ 调用工具: {function_name} | 参数: {json.dumps(args, ensure_ascii=False)}")
-
                 try:
-                    # 所有工具（含 Playwright 同步 API）必须在线程池中执行，
-                    # 避免 "Sync API inside the asyncio loop" 报错
-                    import asyncio as _asyncio
-                    result = await _asyncio.to_thread(
-                        execute_tool, function_name, **args
-                    )
-                except Exception as tool_err:
-                    logger.error(f"工具执行失败 [{function_name}]: {tool_err}", exc_info=True)
-                    result = {"success": False, "error": str(tool_err)}
-                    await self._send_log(session_id, "err", f"❌ 工具失败 [{function_name}]: {tool_err}")
+                    args = json.loads(args_str) if args_str else {}
+                except json.JSONDecodeError:
+                    # LLM 偶发输出非法 JSON：不崩整轮对话，把错误作为工具结果喂回模型自行纠正
+                    args = None
+
+                if args is None:
+                    await self._send_log(session_id, "err",
+                        f"❌ 工具参数 JSON 解析失败 [{function_name}]，已将错误反馈给模型")
+                    result = {"success": False, "error": f"工具参数不是合法 JSON: {str(args_str)[:200]}"}
+                else:
+                    await self._send_log(session_id, "tool",
+                        f"🛠️ 调用工具: {function_name} | 参数: {json.dumps(args, ensure_ascii=False)}")
+                    try:
+                        # 所有工具（含 Playwright 同步 API）必须在线程池中执行，
+                        # 避免 "Sync API inside the asyncio loop" 报错
+                        result = await asyncio.to_thread(
+                            execute_tool, function_name, **args
+                        )
+                    except Exception as tool_err:
+                        logger.error(f"工具执行失败 [{function_name}]: {tool_err}", exc_info=True)
+                        result = {"success": False, "error": str(tool_err)}
+                        await self._send_log(session_id, "err", f"❌ 工具失败 [{function_name}]: {tool_err}")
 
                 await self._send_log(session_id, "tool", f"✅ 工具完成: {function_name}")
 
                 # 将工具执行结果反馈给 LLM
-                self.history.append({
+                history.append({
                     "tool_call_id": tool_call.id,
                     "role": "tool",
                     "name": function_name,
@@ -175,7 +245,7 @@ class XidianAgent(BaseAgent):
 
         # 提取最终回复文本（history 中混合了 dict 和 ChatCompletionMessage 对象）
         final_content = ""
-        for msg in reversed(self.history):
+        for msg in reversed(history):
             role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
             content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
             if role == "assistant" and content:
@@ -187,6 +257,39 @@ class XidianAgent(BaseAgent):
             "response": final_content,
             "tokens": total_tokens,
         }
+
+    async def _force_summarize(self, session_id: str, history: List, total_tokens: Dict[str, int]) -> str:
+        """达到工具轮次上限时：注入系统指令，请求一次不带工具的最终文字总结"""
+        await self._send_log(session_id, "err",
+            f"⚠️ 工具调用已达上限（{self.MAX_TOOL_ROUNDS} 轮），强制停止工具执行")
+        history.append({
+            "role": "user",
+            "content": (
+                f"[系统] 工具调用轮次已达上限（{self.MAX_TOOL_ROUNDS} 轮）。"
+                "请立即基于以上已获取的信息直接输出文字总结；未完成的部分请明确说明原因与建议的后续操作。"
+                "不要再尝试调用任何工具。"
+            ),
+        })
+        response = await asyncio.to_thread(
+            call_with_retry,
+            self.client.chat.completions.create,
+            model=self.model,
+            messages=history,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        if hasattr(response, "usage") and response.usage:
+            total_tokens["prompt"] += response.usage.prompt_tokens
+            total_tokens["completion"] += response.usage.completion_tokens
+            total_tokens["total"] += response.usage.total_tokens
+        summary = ""
+        if hasattr(response, "choices") and response.choices:
+            summary = response.choices[0].message.content or ""
+        if not summary:
+            summary = "工具调用已达上限且未能生成总结，请稍后重试。"
+        history.append({"role": "assistant", "content": summary})
+        await self._send_log(session_id, "agent", f"🤖 {summary}")
+        return summary
 
     async def run_task(self, task_name: str, session_id: str = "default", **kwargs) -> Dict[str, Any]:
         """执行指定任务"""
@@ -209,9 +312,18 @@ class XidianAgent(BaseAgent):
                 await self._send_log(session_id, "err", f"⚠️ 任务未成功: {task_name} {msg}")
             return {"success": ok, "data": result}
         except Exception as e:
-            logger.error(f"任务执行失败: {e}", exc_info=True)
-            await self._send_log(session_id, "err", f"❌ 任务失败: {str(e)}")
-            return {"success": False, "message": str(e)}
+            # 网络层断连（网络/代理抖动/LLM 服务端瞬断）给出可读、可重试的提示，
+            # 其余异常保留完整堆栈便于定位
+            if is_connection_error(e):
+                logger.error(f"任务执行失败（LLM 连接异常）: {e}")
+                msg = describe_llm_error(e)
+                err_type = "LLM_UNREACHABLE"
+            else:
+                logger.error(f"任务执行失败: {e}", exc_info=True)
+                msg = str(e)
+                err_type = "TASK_ERROR"
+            await self._send_log(session_id, "err", f"❌ 任务失败: {msg}")
+            return {"success": False, "error_type": err_type, "message": msg}
 
     async def _send_log(self, session_id: str, cls: str, html: str):
         """推送日志到 WebSocket（在线程池中安全调用）"""
@@ -316,7 +428,7 @@ class XidianAgent(BaseAgent):
         result = await asyncio.to_thread(run_analysis_flow, progress_callback=_progress_callback)
 
         # 完整流程结束后，清理上下文（防止 Token 滚雪球）
-        self._trim_history(max_rounds=3)
+        self._trim_history(session_id, max_rounds=3)
 
         # 微信采集失败不应中断整轮（超星数据仍可能有效），但必须让前端/LLM 看得到失败原因，
         # 否则「抓取失败」会再次被「分析完成」掩盖

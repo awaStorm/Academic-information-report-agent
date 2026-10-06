@@ -28,12 +28,24 @@ async def list_reports():
 @router.get("/{filename}")
 async def get_report(filename: str):
     """获取报告内容"""
-    file_path = os.path.join(REPORTS_DIR, filename)
-    if not os.path.exists(file_path):
+    # 安全：拒绝路径遍历。Windows 下 URL 编码的 %5C（反斜杠）可穿过路由通配，
+    # 若直接 os.path.join(REPORTS_DIR, filename)，攻击者可读取 .env / configs 凭证等任意文件
+    safe_name = os.path.basename(filename)
+    if not safe_name or safe_name != filename or safe_name.startswith("."):
         raise HTTPException(status_code=404, detail="报告不存在")
+    if not safe_name.endswith(".md"):
+        raise HTTPException(status_code=404, detail="报告不存在")
+
+    file_path = os.path.join(REPORTS_DIR, safe_name)
+    # 双保险：解析真实路径后确认仍位于报告目录内
+    real_dir = os.path.normcase(os.path.realpath(REPORTS_DIR))
+    real_file = os.path.normcase(os.path.realpath(file_path))
+    if os.path.dirname(real_file) != real_dir:
+        raise HTTPException(status_code=404, detail="报告不存在")
+
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
-        return {"success": True, "data": {"filename": filename, "content": content}}
+        return {"success": True, "data": {"filename": safe_name, "content": content}}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

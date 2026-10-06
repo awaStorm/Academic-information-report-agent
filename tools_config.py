@@ -55,6 +55,24 @@ TOOLS_METADATA = [
     {
         "type": "function",
         "function": {
+            "name": "align_weread_browser_env",
+            "description": "微信读书扫码环境的诊断与修复工具。用于处理「浏览器档案（configs/weread_profile）与 Playwright 自带 Chromium 版本不匹配」导致扫码窗口弹不出来的问题：症状是 harvest_weread_session 的返回里出现「版本错配」或「Target page, context or browser has been closed」，或日志显示浏览器启动即崩。action=diagnose（默认）是**只读自检**，返回档案版本、当前 Chromium 版本、本机可用 Chromium 修订号、崩溃转储数量与结论；系统在启动浏览器时会自动对齐版本，所以多数情况下直接重试 harvest_weread_session 即可，不必调用本工具。只有当自检结论为 needs_rebuild（本机没有足够新的 Chromium）时，才在**征得用户明确同意后**用 action=rebuild 备份并重建档案——注意这会丢失登录态、必须重新扫码。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["diagnose", "rebuild"],
+                        "description": "diagnose=只读自检（默认，无副作用）；rebuild=备份并重建档案（破坏性：登录态失效，需重新扫码）"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_chaoxing_scraper",
             "description": "抓取超星校园通知列表。当需要更新校园情报数据时调用。如果返回的 error_type 为 AUTH_EXPIRED 或 SESSION_EXPIRED，说明需要先调用 harvest_chaoxing_session 扫码登录。",
             "parameters": {
@@ -191,6 +209,7 @@ TOOL_MAP = {
     "harvest_chaoxing_session": lambda: SessionHarvester().run_harvest(),
     "harvest_weread_session": lambda: WereadHarvester().run_harvest(),
     "harvest_wechat_session": lambda: WechatHarvester().run_harvest(),
+    "align_weread_browser_env": lambda action="diagnose": _align_weread_browser_env(action),
     "run_chaoxing_scraper": lambda progress_callback=None: Scraper().fetch_and_save(progress_callback=progress_callback),
     "run_wechat_scraper": lambda extra_query=None, progress_callback=None: run_wechat_scraper_flow(extra_query=extra_query, progress_callback=progress_callback),
     "process_raw_data": lambda progress_callback=None: DataProcessor().run(progress_callback=progress_callback),
@@ -201,6 +220,48 @@ TOOL_MAP = {
     "send_final_report": lambda pushed_items, date_str=None: _push_notification(pushed_items, date_str),
     "analyze_and_push_intelligence": lambda progress_callback=None: run_analysis_flow(progress_callback=progress_callback),
 }
+
+def _align_weread_browser_env(action="diagnose"):
+    """
+    微信读书扫码环境的自检（diagnose，只读）与重建（rebuild，破坏性）。
+
+    为什么需要：Playwright 的持久化档案与「它绑定的 Chromium 版本」强耦合，低版本
+    Chromium 打开被高版本写过的档案会在启动瞬间 abort，Playwright 只报
+    "Target page, context or browser has been closed"，从错误里完全看不出病因。
+    启动浏览器时已内置自动对齐（挑本机更高版本的 chromium），本工具用于在
+    自动对齐也做不到时，让 Agent/用户能拿到结论并选择「重建档案」。
+    """
+    if action == "rebuild":
+        ok, message = WereadHarvester.rebuild_profile()
+        return {
+            "success": ok,
+            "action": "rebuild",
+            "message": message,
+            "need_scan": True,
+            "diagnose": WereadHarvester.diagnose_browser_env(),
+        }
+
+    info = WereadHarvester.diagnose_browser_env()
+    next_step = {
+        "ok": "版本一致，直接调用 harvest_weread_session 调起扫码窗口即可。",
+        "auto_align": "系统会在启动浏览器时自动改用匹配的 Chromium，"
+                      "直接调用 harvest_weread_session 即可（会保留登录态）。",
+        "no_profile": "档案不存在，直接调用 harvest_weread_session 扫码即可（会自动创建）。",
+        "needs_rebuild": "本机无法自动对齐。请先向用户说明两条路："
+                         "① 升级 Playwright（pip install -U playwright 后重启后端）；"
+                         "② 重建档案（登录态会失效、需重新扫码）。"
+                         "仅在用户明确同意后才用 action=rebuild。",
+        "unknown": "无法判定，直接尝试 harvest_weread_session；失败再排查。",
+    }.get(info.get("status"), "直接尝试 harvest_weread_session。")
+    return {
+        "success": True,
+        "action": "diagnose",
+        "status": info.get("status"),
+        "message": info.get("message"),
+        "next_step": next_step,
+        "detail": info,
+    }
+
 
 def _check_and_save(title, content, platform):
     """去重检查并保存"""

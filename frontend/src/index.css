@@ -7,6 +7,9 @@
     background-color: #0a0a0f;
     color: #e4e4e7;
     font-family: "Inter", system-ui, sans-serif;
+    /* 暗色配色方案：让原生 select 下拉弹层 / date 日历弹层跟随暗色渲染，
+       否则系统会用白色弹层 + 黑字叠加在暗色页面上，观感割裂 */
+    color-scheme: dark;
   }
 
   /* 滚动条 */
@@ -48,5 +51,18 @@
            placeholder-gray-600
            focus:border-accent-primary/50 focus:outline-none focus:ring-2 focus:ring-accent-primary/20
            transition-all duration-200;
+  }
+
+  /* 下拉框专用：appearance 统一 + option 暗色兜底（部分浏览器不吃 color-scheme 继承） */
+  .select-field {
+    @apply bg-white/5 border border-white/10 rounded-lg px-3 py-2 pr-8 text-sm text-gray-200
+           focus:border-accent-primary/50 focus:outline-none focus:ring-2 focus:ring-accent-primary/20
+           transition-all duration-200;
+    color-scheme: dark;
+  }
+
+  .select-field option {
+    background-color: #18181b;
+    color: #e4e4e7;
   }
 }

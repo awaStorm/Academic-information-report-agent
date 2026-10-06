@@ -4,7 +4,8 @@
  */
 import axios, { type AxiosRequestConfig } from "axios";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8138";
+/** 后端 REST 地址：VITE_API_BASE_URL 优先，默认本机 8138（websocket.ts 复用其推导 WS 地址） */
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8138";
 
 const instance = axios.create({
   baseURL: BASE_URL,
@@ -15,10 +16,16 @@ const instance = axios.create({
 });
 
 // 响应拦截器：自动解包 response.data，错误统一处理
+// 错误文案优先取业务字段 message，其次取 FastAPI HTTPException 的 detail，
+// 最后才退回 axios 的 "Request failed with status code 500" 这类无信息量文案
 instance.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    const message = error.response?.data?.message || error.message || "请求失败";
+    const message =
+      error.response?.data?.message ||
+      error.response?.data?.detail ||
+      error.message ||
+      "请求失败";
     return Promise.reject(new Error(message));
   }
 );

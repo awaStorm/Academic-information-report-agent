@@ -20,6 +20,11 @@ export interface ConfigData {
   run_times: string[];
   failure_alert_threshold: number;
   dashboard_page_size: number;
+  multimodal_enabled: boolean;
+  multimodal_api_key: string;
+  multimodal_base_url: string;
+  multimodal_model: string;
+  max_images: number;
 }
 
 export const configApi = {

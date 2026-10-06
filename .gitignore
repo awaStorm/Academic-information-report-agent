@@ -243,8 +243,12 @@ reports/
 # 前端依赖
 node_modules/
 
-# IDE 工作区数据
+# 本地编辑器 / IDE 工作区数据（缓存、索引与本地状态，一律勿提交）
 .codebuddy/
+.trae/
+
+# TypeScript 增量编译缓存（tsc -b 产物；正常情况下落在 node_modules/.tmp 内）
+*.tsbuildinfo
 
 # 临时标记文件
 _title_keep.bat

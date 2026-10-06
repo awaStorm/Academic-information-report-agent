@@ -10,6 +10,7 @@ import PreferencesPage from "./pages/PreferencesPage";
 import ReportsPage from "./pages/ReportsPage";
 import AgentChatPage from "./pages/AgentChatPage";
 import CtfPage from "./pages/CtfPage";
+import CalendarPage from "./pages/CalendarPage";
 
 const App: React.FC = () => {
   return (
@@ -21,6 +22,7 @@ const App: React.FC = () => {
           <Route path="/preferences" element={<PreferencesPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/ctf" element={<CtfPage />} />
+          <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/agents/:agentName/chat" element={<AgentChatPage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>

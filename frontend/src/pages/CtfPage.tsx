@@ -15,7 +15,7 @@ import {
   ArrowUpDown,
   ChevronDown,
 } from "lucide-react";
-import { ctfApi, type CtfEvent, type SortOption, type CtfStatus } from "../api/ctf";
+import { ctfApi, type CtfEvent, type SortOption } from "../api/ctf";
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -58,6 +58,10 @@ const STATUS_CONFIG: Record<string, { dot: string; label: string }> = {
   recently_ended: {
     dot: "bg-red-500/70 shadow-[0_0_4px_rgba(239,68,68,0.35)]",
     label: "近期结束",
+  },
+  expired: {
+    dot: "bg-gray-500",
+    label: "已结束",
   },
 };
 
@@ -159,6 +163,9 @@ const CtfPage: React.FC = () => {
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [pinLoading, setPinLoading] = useState<Set<string>>(new Set());
 
+  // ---- 自动刷新标记：loadEvents 发现后端 refreshing 时置位，由 effect 启动轮询 ----
+  const [autoRefresh, setAutoRefresh] = useState(false);
+
   // ---- 加载 ----
   const loadEvents = useCallback(async () => {
     setLoading(true);
@@ -177,6 +184,11 @@ const CtfPage: React.FC = () => {
       if (res.success) {
         setEvents(res.data);
         setLastRefresh(res.last_refresh);
+        // 后端缓存过期会自动触发后台线程刷新：立即返回了旧缓存 + refreshing 标记，
+        // 前端进入轮询，完成后自动加载新数据
+        if (res.refreshing) {
+          setAutoRefresh(true);
+        }
       } else {
         setError(res.message || "加载失败");
       }
@@ -206,6 +218,41 @@ const CtfPage: React.FC = () => {
     };
   }, []);
 
+  // 启动轮询（手动刷新与后端自动刷新共用）
+  const startPolling = useCallback(() => {
+    if (pollRef.current) return; // 已在轮询
+    setRefreshing(true);
+    setRefreshPhase("正在启动刷新...");
+    pollRef.current = setInterval(async () => {
+      try {
+        const status = await ctfApi.refreshStatus();
+        if (!status.refreshing) {
+          // 完成
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setRefreshing(false);
+          setRefreshPhase("");
+          setError(status.message || "刷新完成");
+          // 重新加载数据
+          await loadPins();
+          await loadEvents();
+        } else {
+          setRefreshPhase(status.phase || status.message || "刷新中...");
+        }
+      } catch {
+        // 轮询失败不中断
+      }
+    }, 2000);
+  }, [loadEvents, loadPins]);
+
+  // 后端自动刷新（缓存过期）触发时进入轮询
+  useEffect(() => {
+    if (autoRefresh) {
+      setAutoRefresh(false);
+      startPolling();
+    }
+  }, [autoRefresh, startPolling]);
+
   const handleRefresh = async () => {
     setError("");
     setRefreshing(true);
@@ -225,26 +272,7 @@ const CtfPage: React.FC = () => {
       }
 
       // 2) 轮询进度
-      pollRef.current = setInterval(async () => {
-        try {
-          const status = await ctfApi.refreshStatus();
-          if (!status.refreshing) {
-            // 完成
-            if (pollRef.current) clearInterval(pollRef.current);
-            pollRef.current = null;
-            setRefreshing(false);
-            setRefreshPhase("");
-            setError(status.message || "刷新完成");
-            // 重新加载数据
-            await loadPins();
-            await loadEvents();
-          } else {
-            setRefreshPhase(status.phase || status.message || "刷新中...");
-          }
-        } catch {
-          // 轮询失败不中断
-        }
-      }, 2000);
+      startPolling();
     } catch (e) {
       setError((e as Error).message);
       setRefreshing(false);
@@ -298,6 +326,7 @@ const CtfPage: React.FC = () => {
   const upcomingCount = events.filter((e) => e.status === "upcoming").length;
   const runningCount = events.filter((e) => e.status === "running").length;
   const endedCount = events.filter((e) => e.status === "recently_ended").length;
+  const expiredCount = events.filter((e) => e.status === "expired").length;
 
   // ======================== 渲染 ========================
 
@@ -395,6 +424,12 @@ const CtfPage: React.FC = () => {
             <span className="w-2 h-2 rounded-full bg-red-500/70 shadow-[0_0_4px_rgba(239,68,68,0.35)]" />
             近期结束 {endedCount}
           </span>
+          {expiredCount > 0 && (
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-gray-500" />
+              已结束 {expiredCount}
+            </span>
+          )}
         </div>
       )}
 
@@ -493,7 +528,7 @@ const CtfPage: React.FC = () => {
                       )}
 
                       {event.weight >= HIGH_WEIGHT_THRESHOLD && (
-                        <Trophy size={13} className="text-amber-400 flex-shrink-0" title="高权重赛事" />
+                        <Trophy size={13} className="text-amber-400 flex-shrink-0" aria-label="高权重赛事" />
                       )}
 
                       {event.weight > 0 && (

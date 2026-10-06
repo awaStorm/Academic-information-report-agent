@@ -1,12 +1,12 @@
 import json
 import os
-from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime
 
 # 导入修正后的工具配置
 from tools_config import TOOLS_METADATA, execute_tool
 from src.utils.config_loader import CONFIG
+from src.utils.llm_client import build_llm_client, call_with_retry
 
 load_dotenv()
 
@@ -19,10 +19,9 @@ class XidianAgent:
         if not api_key:
             raise ValueError("LLM_API_KEY 未设置，请在 .env 中配置或通过前端保存")
         
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url=base_url
-        )
+        # 统一客户端口径：默认绕开系统代理 + 连接类错误自动重试
+        # （详见 src/utils/llm_client.py）
+        self.client = build_llm_client(api_key, base_url)
         
         # ✅ 修改：从 CONFIG 读取模型名称，不再硬编码[cite: 4]
         self.model = CONFIG.get("analysis", {}).get("model_name", "")
@@ -31,8 +30,11 @@ class XidianAgent:
         # ✅ 修改：同步读取分析参数
         self.temperature = CONFIG.get("analysis", {}).get("temperature", 0.1)
         self.max_tokens = CONFIG.get("analysis", {}).get("max_tokens", 20000)
-        
+
         self.history = []
+
+        # 工具调用轮次上限：防止 LLM 陷入「扫码→重抓→仍失败→再扫码」无限循环烧 token
+        self.MAX_TOOL_ROUNDS = 15
         
         # 核心系统提示词
         self.system_prompt = {
@@ -68,9 +70,11 @@ class XidianAgent:
         timed_input = f"【当前系统时间：{current_time_str}】\n用户指令：{user_input}"
         self.history.append({"role": "user", "content": timed_input})
 
+        tool_rounds = 0
         while True:
-            # 1. 发送请求给 LLM
-            response = self.client.chat.completions.create(
+            # 1. 发送请求给 LLM（连接类错误自动指数退避重试，避免瞬时抖动中断对话）
+            response = call_with_retry(
+                self.client.chat.completions.create,
                 model=self.model,
                 messages=self.history,
                 tools=TOOLS_METADATA,
@@ -94,24 +98,61 @@ class XidianAgent:
 
             # 3. 检查是否需要调用工具
             if not response_msg.tool_calls:
-                # 由 Agent 决策是否退出
-                if any(word in response_msg.content for word in ["再见", "退出"]):
+                # 由 Agent 决策是否退出（仅短回复中的退出词才判定，避免报告正文含该词导致误退出）
+                if (response_msg.content and len(response_msg.content) < 50
+                        and any(word in response_msg.content for word in ["再见", "退出"])):
                     return "EXIT_SIGNAL"
+                break
+
+            # 工具调用轮次保护：超限后强制收敛为文字总结，防止无限循环烧 token
+            tool_rounds += 1
+            if tool_rounds > self.MAX_TOOL_ROUNDS:
+                print(f"  [系统日志] ⚠️ 工具调用已达上限（{self.MAX_TOOL_ROUNDS} 轮），强制停止工具执行")
+                self.history.append({
+                    "role": "user",
+                    "content": (
+                        f"[系统] 工具调用轮次已达上限（{self.MAX_TOOL_ROUNDS} 轮）。"
+                        "请立即基于以上已获取的信息直接输出文字总结；未完成的部分请明确说明原因与建议的后续操作。"
+                        "不要再尝试调用任何工具。"
+                    ),
+                })
+                response = call_with_retry(
+                    self.client.chat.completions.create,
+                    model=self.model,
+                    messages=self.history,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                )
+                summary = ""
+                if hasattr(response, "choices") and response.choices:
+                    summary = response.choices[0].message.content or ""
+                if summary:
+                    self.history.append({"role": "assistant", "content": summary})
+                    if CONFIG.get("pusher", {}).get("enable_console_report", True):
+                        print(f"\n🤖 Agent: {summary}")
                 break
 
             # 4. 执行工具逻辑
             for tool_call in response_msg.tool_calls:
                 function_name = tool_call.function.name
-                
+
                 # ✅ 修正变量名错误：使用 tool_call.function.arguments
                 args_str = tool_call.function.arguments
-                args = json.loads(args_str) if args_str else {}
-                
-                print(f"  [系统日志] 🛠️  启动工具: {function_name} | 参数: {args}")
-                
-                # 调用 tools_config 中的执行器，支持参数解包[cite: 2]
-                result = execute_tool(function_name, **args)
-                
+                try:
+                    args = json.loads(args_str) if args_str else {}
+                except json.JSONDecodeError:
+                    # LLM 偶发输出非法 JSON：不崩整轮对话，把错误作为工具结果喂回模型自行纠正
+                    args = None
+
+                if args is None:
+                    print(f"  [系统日志] ❌ 工具参数 JSON 解析失败 [{function_name}]，已将错误反馈给模型")
+                    result = {"success": False, "error": f"工具参数不是合法 JSON: {str(args_str)[:200]}"}
+                else:
+                    print(f"  [系统日志] 🛠️  启动工具: {function_name} | 参数: {args}")
+
+                    # 调用 tools_config 中的执行器，支持参数解包[cite: 2]
+                    result = execute_tool(function_name, **args)
+
                 # 将工具执行结果反馈给 LLM
                 self.history.append({
                     "tool_call_id": tool_call.id,

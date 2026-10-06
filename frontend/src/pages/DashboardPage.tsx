@@ -44,9 +44,12 @@ const DashboardPage: React.FC = () => {
     }
   };
 
-  // 仅在挂载时加载一次，筛选条件变化后通过"刷新"按钮手动触发
+  // 筛选条件变化自动刷新（300ms 防抖，避免日期控件逐步选择时请求风暴）；刷新按钮仍可手动触发
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    const t = setTimeout(loadData, 300);
+    return () => clearTimeout(t);
+  }, [startDate, endDate, platform]);
 
   return (
     <div className="space-y-6">
@@ -83,7 +86,7 @@ const DashboardPage: React.FC = () => {
         </div>
         <div>
           <label className="text-xs text-gray-500 mb-1 block">平台</label>
-          <select className="input-field" value={platform}
+          <select className="select-field" value={platform}
             onChange={(e) => setPlatform(e.target.value)}>
             <option value="all">全部</option>
             <option value="wechat">微信</option>
@@ -126,6 +129,41 @@ const DashboardPage: React.FC = () => {
                 } />
               </div>
               <p className="text-xs text-gray-500 line-clamp-2">{record.brief}</p>
+              {/* 事件时间轴：报名/初赛/决赛等多时间点 */}
+              {record.timeline && record.timeline.length > 0 && (
+                <div className="mt-2">
+                  <div className="text-[10px] text-gray-600 mb-1">📅 事件时间轴</div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {record.timeline.filter((node) => node && typeof node === "object").map((node, ni, arr) => (
+                      <React.Fragment key={ni}>
+                        <span className="text-xs px-2 py-0.5 rounded bg-amber-400/10 text-amber-300 border border-amber-400/30"
+                          title={node.time ? `${node.date ?? ""} ${node.time}` : node.date}>
+                          {node.label} {node.date?.slice(5)}
+                          {node.time ? ` ${node.time}` : ""}
+                        </span>
+                        {ni < arr.length - 1 && (
+                          <span className="text-gray-600 text-xs">→</span>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* 扩展链接：原文 + 正文内嵌引用，一目了然 */}
+              {record.links && record.links.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {record.links.slice(0, 5).map((l, li) => (
+                    <a key={li} href={l} target="_blank" rel="noreferrer"
+                      title={l}
+                      className="text-xs px-2 py-0.5 rounded text-accent-light bg-accent-primary/10 border border-accent-primary/30 hover:bg-accent-primary/20 transition-colors max-w-[220px] truncate">
+                      🔗 {li === 0 ? "原文" : `引用${li}`}
+                    </a>
+                  ))}
+                  {record.links.length > 5 && (
+                    <span className="text-xs px-2 py-0.5 text-gray-500">+{record.links.length - 5}</span>
+                  )}
+                </div>
+              )}
             </div>
           ))
         )}

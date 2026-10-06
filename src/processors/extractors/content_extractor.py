@@ -1,5 +1,36 @@
 import json
 import os
+import re
+
+# http/https 链接匹配（排除中文标点/常见右括号类结尾）
+URL_PATTERN = re.compile(
+    r'https?://[^\s<>"\'\u3002\uff0c\uff1b\uff01\uff1f\u3001\uff09\u3011\)\]\}]+',
+    re.IGNORECASE,
+)
+
+def extract_links(text: str, limit: int = 10) -> list:
+    """从正文提取 http/https 链接，去重并限量（超星通知/公众号正文中内嵌的报名表单、附件等）"""
+    if not text:
+        return []
+    seen, links = set(), []
+    for m in URL_PATTERN.findall(text):
+        url = m.rstrip('.,;、')
+        if url and url not in seen:
+            seen.add(url)
+            links.append(url)
+            if len(links) >= limit:
+                break
+    return links
+
+def merge_links(*groups: list, limit: int = 10) -> list:
+    """多组链接按顺序合并去重（靠前的组优先，本体链接应放最前），总量限制 limit"""
+    seen, merged = set(), []
+    for group in groups:
+        for url in (group or []):
+            if url and url not in seen:
+                seen.add(url)
+                merged.append(url)
+    return merged[:limit]
 
 class ContentExtractor:
     """统一内容处理类"""
@@ -33,6 +64,7 @@ class ContentExtractor:
             
             # 2. 构建精简版对象
             # 只保留 AI 总结日报所必须的字段，其他的全部扔掉
+            external = (item.get("external_link") or "").strip()
             refined_item = {
                 "id": item.get("content_id") or item.get("id"),
                 "platform": item.get("source_platform", "unknown"),
@@ -40,7 +72,9 @@ class ContentExtractor:
                 "title": item.get("title", "").strip(),
                 "date": item.get("date", ""),
                 "body": raw_text.strip(),
-                "link": item.get("external_link") # 仅保留链接，不抓取内容
+                "link": external,  # 仅保留链接，不抓取内容
+                # 扩展链接：本体链接优先并入首位，正文内嵌链接紧随其后（供仪表盘/日历展示）
+                "links": merge_links([external] if external else [], extract_links(raw_text)),
             }
             
             # 3. 简单的内部文本清洗（不联网）

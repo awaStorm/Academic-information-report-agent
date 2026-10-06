@@ -6,6 +6,15 @@ DEFAULT_CONFIG = {
         "max_tokens": 20000,
         "model_name": "deepseek-v4-flash",
         "temperature": 0.1,
+        # 多模态识图：可选增强，从通知图片中提取文字/日期/二维码内容
+        # 未开启或调用失败时自动降级为纯文本分析，不阻塞主流程
+        "multimodal": {
+            "enabled": False,
+            "api_key": "",
+            "base_url": "",
+            "model": "",
+            "max_images": 3,
+        },
     },
     "collectors": {
         # 微信来源编排（2026-07 原公众号后台接口被官方关闭后，主通道切换为微信读书）

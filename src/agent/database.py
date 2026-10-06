@@ -47,6 +47,16 @@ class AgentMemory:
                 categories TEXT
             )
         ''')
+        # 幂等迁移：pushed_records 补 links 列（扩展链接 JSON 数组，供仪表盘/日历展示）
+        # 以及 event_date（事件发生日期，与 push_time 获取时间分离）+ timeline（事件时间轴 JSON 数组）
+        self.cursor.execute("PRAGMA table_info(pushed_records)")
+        existing_cols = {row[1] for row in self.cursor.fetchall()}
+        if "links" not in existing_cols:
+            self.cursor.execute("ALTER TABLE pushed_records ADD COLUMN links TEXT")
+        if "event_date" not in existing_cols:
+            self.cursor.execute("ALTER TABLE pushed_records ADD COLUMN event_date TEXT")
+        if "timeline" not in existing_cols:
+            self.cursor.execute("ALTER TABLE pushed_records ADD COLUMN timeline TEXT")
         self.conn.commit()
 
     # ---- 情报去重 ----
@@ -68,18 +78,28 @@ class AgentMemory:
 
     # ---- 推送记录 ----
 
-    def save_pushed_record(self, title, platform, category="其他", brief="", link="", status="pushed"):
-        """保存推送记录"""
+    def save_pushed_record(self, title, platform, category="其他", brief="", link="",
+                           status="pushed", links=None, event_date=None, timeline=None):
+        """保存推送记录
+        - links: 扩展链接列表或 JSON 字符串
+        - event_date: 事件发生日期 YYYY-MM-DD（与 push_time 获取时间分离；为 null 则该记录不进日历）
+        - timeline: 事件时间轴列表或 JSON 字符串 [{label, date, time}]
+        """
+        if isinstance(links, list):
+            links = json.dumps(links, ensure_ascii=False)
+        if isinstance(timeline, list):
+            timeline = json.dumps(timeline, ensure_ascii=False)
         self.cursor.execute('''
-            INSERT INTO pushed_records (title, platform, category, brief, link, status, push_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (title, platform, category, brief, link, status, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            INSERT INTO pushed_records (title, platform, category, brief, link, status, links, event_date, timeline, push_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (title, platform, category, brief, link, status, links, event_date, timeline,
+              datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         self.conn.commit()
 
     def get_pushed_records_by_date_range(self, start_date, end_date, platform=None, limit=None):
-        """按日期范围查询推送记录"""
+        """按日期范围查询推送记录（按 push_time 获取时间过滤）"""
         query = '''
-            SELECT title, platform, category, brief, link, status, push_time
+            SELECT title, platform, category, brief, link, status, links, event_date, timeline, push_time
             FROM pushed_records
             WHERE push_time >= ? AND push_time <= ?
         '''
@@ -96,7 +116,40 @@ class AgentMemory:
 
         self.cursor.execute(query, params)
         rows = self.cursor.fetchall()
-        return [dict(row) for row in rows]
+        records = []
+        for row in rows:
+            record = dict(row)
+            # links：JSON 数组解析，兼容旧记录（无 links 但有单 link）
+            links = []
+            if record.get("links"):
+                try:
+                    parsed = json.loads(record["links"])
+                    if isinstance(parsed, list):
+                        links = parsed
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if not links and record.get("link"):
+                links = [record["link"]]
+            record["links"] = links
+            # timeline：JSON 数组解析；防御存量脏数据——元素必须为 dict，
+            # 否则前端 node.label / node.date 访问会导致渲染崩溃
+            timeline = []
+            if record.get("timeline"):
+                try:
+                    parsed = json.loads(record["timeline"])
+                    if isinstance(parsed, list):
+                        for n in parsed:
+                            if not isinstance(n, dict):
+                                continue
+                            d = n.get("date")
+                            if isinstance(d, str):
+                                n["date"] = d.strip().replace("/", "-")  # 斜杠日期归一
+                            timeline.append(n)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            record["timeline"] = timeline
+            records.append(record)
+        return records
 
     # ---- 偏好管理 ----
 

@@ -3,7 +3,7 @@
  */
 import client from "./client";
 
-export type CtfStatus = "upcoming" | "running" | "recently_ended";
+export type CtfStatus = "upcoming" | "running" | "recently_ended" | "expired";
 
 export interface CtfEvent {
   id: string;
@@ -26,6 +26,8 @@ export interface CtfResponse {
   total: number;
   pinned_count: number;
   last_refresh: string | null;
+  /** 后端缓存过期已自动触发后台刷新时为 true，前端应进入轮询等新数据 */
+  refreshing?: boolean;
   message?: string;
 }
 

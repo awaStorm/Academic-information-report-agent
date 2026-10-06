@@ -1,13 +1,20 @@
-﻿requests>=2.28.0
+requests>=2.28.0
 beautifulsoup4>=4.11.0
-playwright>=1.40.0
+# 必须精确锁版本：持久化浏览器档案 configs/weread_profile 与 Playwright 绑定的
+# Chromium 版本强耦合。低版本 Playwright 打开「高版本写过」的档案时，有头浏览器会在
+# 启动瞬间 abort（exitCode 0x80000003），Playwright 只报
+# "Target page, context or browser has been closed"，且无头模式不受影响，
+# 极难定位。实测复现与结论见 BUGFIX_LOG.md（2026-10-06）。
+# 若需升级：先升级本版本号，再执行 python -m playwright install chromium。
+playwright==1.59.0
 python-dotenv>=1.0.0
 openai>=1.0.0
 pyyaml>=6.0
 Pillow>=9.0.0
 apscheduler>=3.10.0
 fastapi>=0.110.0
-uvicorn>=0.29.0
+uvicorn[standard]>=0.29.0
 pydantic>=2.0.0
 python-multipart>=0.0.9
+python-dateutil>=2.8.0
 

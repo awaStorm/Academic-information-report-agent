@@ -2,7 +2,7 @@
  * frontend/src/pages/ConfigPage.tsx - 配置面板页面
  */
 import React, { useState, useEffect } from "react";
-import { Save, TestTube, Clock, Cpu, Send, Plus, X, Radio } from "lucide-react";
+import { Save, Clock, Cpu, Send, Plus, X, Radio } from "lucide-react";
 import { configApi, ConfigData } from "../api/config";
 
 const defaultConfig: ConfigData = {
@@ -22,6 +22,11 @@ const defaultConfig: ConfigData = {
   run_times: ["08:00"],
   failure_alert_threshold: 3,
   dashboard_page_size: 20,
+  multimodal_enabled: false,
+  multimodal_api_key: "",
+  multimodal_base_url: "",
+  multimodal_model: "",
+  max_images: 3,
 };
 
 const ConfigPage: React.FC = () => {
@@ -135,6 +140,39 @@ const ConfigPage: React.FC = () => {
                 onChange={(e) => setConfig({ ...config, max_tokens: parseInt(e.target.value) })} />
             </div>
           </div>
+
+          {/* 多模态识图配置 */}
+          <h3 className="text-sm font-semibold text-gray-400 flex items-center gap-2 pt-2">
+            <Cpu size={16} /> 多模态识图（可选）
+          </h3>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={config.multimodal_enabled}
+              onChange={(e) => setConfig({ ...config, multimodal_enabled: e.target.checked })}
+              className="accent-accent-primary" />
+            启用多模态识图（从通知图片提取文字/日期/二维码）
+          </label>
+          <p className="text-[11px] text-gray-600 leading-relaxed">
+            未开启或调用失败时自动降级为纯文本分析，不影响主流程。若当前模型不支持视觉，可在此填写独立的视觉模型 API。<br />
+            注意：① 配置保存后需<strong>重启后端</strong>生效；② 每条含图情报都会单独串行调用一次视觉模型（单条最多识别下方设置的张数），含图情报较多时整轮分析耗时会明显增加；③ 图片过大或接口不支持该模型时该条自动跳过识图，仅以纯文本分析。
+          </p>
+          {config.multimodal_enabled && (
+            <div className="space-y-2 bg-dark-card/50 border border-white/5 rounded-lg p-3">
+              <input type="password" placeholder="多模态 API Key（留空复用 LLM Key）"
+                className="input-field w-full" value={config.multimodal_api_key}
+                onChange={(e) => setConfig({ ...config, multimodal_api_key: e.target.value })} />
+              <input type="text" placeholder="多模态 Base URL（留空复用 LLM Base URL）"
+                className="input-field w-full" value={config.multimodal_base_url}
+                onChange={(e) => setConfig({ ...config, multimodal_base_url: e.target.value })} />
+              <input type="text" placeholder="多模态模型名（如 deepseek-vl / qwen-vl-max）"
+                className="input-field w-full" value={config.multimodal_model}
+                onChange={(e) => setConfig({ ...config, multimodal_model: e.target.value })} />
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">每条最多识图张数</label>
+                <input type="number" min={1} max={10} className="input-field w-full" value={config.max_images}
+                  onChange={(e) => setConfig({ ...config, max_images: parseInt(e.target.value) })} />
+              </div>
+            </div>
+          )}
 
           <h3 className="text-sm font-semibold text-gray-400 flex items-center gap-2 pt-2">
             <Cpu size={16} /> 采集参数

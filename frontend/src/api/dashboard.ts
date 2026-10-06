@@ -3,14 +3,23 @@
  */
 import client from "./client";
 
+export interface TimelineNode {
+  label: string;
+  date: string;
+  time?: string;
+}
+
 export interface DashboardRecord {
   title: string;
   platform: string;
   category: string;
   brief: string;
   link: string;
+  links?: string[];
   status: string;
   push_time: string;
+  event_date?: string | null;
+  timeline?: TimelineNode[];
 }
 
 export interface DashboardStats {

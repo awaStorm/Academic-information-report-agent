@@ -14,12 +14,13 @@ import re
 import time
 import threading
 from pathlib import Path
-from datetime import datetime, timedelta, time as dt_time
+from datetime import datetime, timedelta, time as dt_time, timezone
 from typing import Optional, List, Tuple
 
 from fastapi import APIRouter, Query
 import requests
 from bs4 import BeautifulSoup
+from dateutil.parser import parse as dateutil_parse
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -45,15 +46,6 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     ),
-}
-
-# ---- 月份名称映射 (用于解析纯文本日期) ----
-_MONTH_MAP: dict = {
-    "january": 1, "february": 2, "march": 3, "april": 4,
-    "may": 5, "june": 6, "july": 7, "august": 8,
-    "september": 9, "october": 10, "november": 11, "december": 12,
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
 }
 
 # ---- 异步刷新状态 ----
@@ -110,124 +102,109 @@ def should_refresh() -> bool:
 
 # ============ 日期解析（核心修复）============
 
-def _parse_ctftime_date(date_text: str) -> Tuple[Optional[datetime], Optional[datetime]]:
+# 文本中的 UTC 时刻（"03:30 UTC" -> 03:30），用于回填真实起止时刻
+_CLOCK_RE = re.compile(r'\b(\d{1,2}):(\d{2})\b')
+
+
+def _apply_clock(text: str, start: Optional[datetime], end: Optional[datetime]):
+    """把文本里的 HH:MM（UTC）回填到已解析出的日期上。
+
+    CTFtime 日期列同时给出时刻（如 "19 Sept., 03:30 UTC — 20 Sept. 2026, 03:30 UTC"）。
+    旧实现在清洗阶段把时刻剥掉，并把 end 硬编码成 23:59:59，导致：
+      - 赛事实际已结束仍被判为 running（end 最多被膨胀 ~24h）
+      - 日历里所有赛事都显示成整天区间，结束时间还因时区换算跨到次日
+    按出现顺序回填：第 1 个时刻给 start，第 2 个给 end；只有 1 个则两端共用。
     """
-    解析 CTFtime 纯文本日期为 (start_dt, end_dt)。
-    支持格式：
-      - "July 01, 2026" / "01 July, 2026"
-      - "July 01-07, 2026" (同月区间)
-      - "July 01, 2026 — July 07, 2026" (跨格式)
-      - "July 01, 2026, 12:00 UTC — July 03, 2026, 12:00 UTC"
+    clocks = [(int(m.group(1)), int(m.group(2))) for m in _CLOCK_RE.finditer(text)]
+    if not clocks or start is None:
+        return start, end
+    h, mi = clocks[0]
+    start = start.replace(hour=h, minute=mi, second=0, microsecond=0)
+    if end is not None:
+        h2, mi2 = clocks[1] if len(clocks) >= 2 else clocks[0]
+        end = end.replace(hour=h2, minute=mi2, second=0, microsecond=0)
+    return start, end
+
+
+def _parse_ctftime_date(date_text: str) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """解析 CTFtime 纯文本日期为 (start_dt, end_dt)，并保留文本中的 UTC 时刻。
+
+    返回 (None, None) 表示无法解析。
+    """
+    if not date_text or not date_text.strip():
+        return None, None
+    start, end = parse_date_range(date_text)
+    if start is None and end is None:
+        return None, None
+    return _apply_clock(date_text, start, end)
+
+
+def parse_date_range(date_text: str) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """用 dateutil 解析 CTFtime 日期文本，返回仅含日期部分的 (start_dt, end_dt)。
+
+    仅负责日期，真实 HH:MM 由 _apply_clock 从原始文本回填（见 _parse_ctftime_date）。
+    支持写法：
+      - "25 Sept., 13:30 UTC — 27 Sept. 2026, 21:00 UTC"（前半缺年份，CTFtime 最常见）
+      - "July 01, 2026 — July 07, 2026"
+      - "Jul 3-5, 2026" / "03-07 July 2026"（同月区间）
+      - "July 01, 2026"（单日，end 为 None）
+    本函数产出的 end 一律带 23:59:59，真实时刻由 _apply_clock 回填。
     返回 (None, None) 表示无法解析。
     """
     if not date_text or not date_text.strip():
         return None, None
 
     text = date_text.strip()
-
-    # 去除时间信息（如 "12:00 UTC", "21:00 UTC"）以简化匹配
-    text_clean = re.sub(r',?\s*\d{1,2}:\d{2}\s*(?:UTC|utc)', '', text).strip()
     # 去除前导星期几
-    text_clean = re.sub(r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+', '', text_clean, flags=re.IGNORECASE).strip()
-    # 清理残留的孤逗号和多余空白
-    text_clean = re.sub(r'\s*,\s*—', ' —', text_clean)
-    text_clean = re.sub(r'\s{2,}', ' ', text_clean).strip()
+    text = re.sub(r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+', '', text, flags=re.IGNORECASE)
+    # 去除时刻信息：时刻统一由 _apply_clock 从原始文本回填；交给 dateutil 会带上 tzinfo，
+    # 与 CTFtime "naive 即 UTC" 的语义冲突
+    text = re.sub(r',?\s*\d{1,2}:\d{2}\s*(?:UTC|utc)', '', text)
+    text = re.sub(r'\s{2,}', ' ', text).strip()
+    if not text:
+        return None, None
 
-    month_names = '|'.join(_MONTH_MAP.keys())
+    # 缺省年份取文本中的显式年份（取最后一个），覆盖 "前半缺年份" 的非对称写法
+    years = re.findall(r'\b(\d{4})\b', text)
+    default_dt = datetime(int(years[-1]) if years else datetime.now().year, 1, 1)
 
-    # --- 尝试 1: 跨月区间 "Month DD, YYYY — Month DD, YYYY" ---
-    full_range = re.match(
-        rf'({month_names})\s+(\d{{1,2}}),?\s*(\d{{4}})\s*[-–—]+\s*({month_names})\s+(\d{{1,2}}),?\s*(\d{{4}})',
-        text_clean, re.IGNORECASE,
-    )
-    if full_range:
-        m1, d1, y1, m2, d2, y2 = full_range.groups()
-        m1n = _MONTH_MAP.get(m1.lower(), 0)
-        m2n = _MONTH_MAP.get(m2.lower(), 0)
-        if m1n and m2n:
-            start = datetime(int(y1), m1n, int(d1))
-            end = datetime(int(y2), m2n, int(d2), 23, 59, 59)
-            return start, end
+    def _to_dt(fragment: str) -> Optional[datetime]:
+        if not fragment:
+            return None
+        try:
+            return dateutil_parse(fragment, fuzzy=True, default=default_dt)
+        except (ValueError, OverflowError, TypeError):
+            return None
 
-    # --- 尝试 2: 跨月区间（前半缺年份）"DD Month — DD Month YYYY" ---
-    # upcoming 页面常见格式: "03 July, 21:00 UTC — 04 July 2026, 06:00 UTC"
-    # 去除时间后: "03 July — 04 July 2026"
-    asym_range_dm = re.match(
-        rf'(\d{{1,2}})\s+({month_names})\s*[-–—]+\s*(\d{{1,2}})\s+({month_names}),?\s*(\d{{4}})',
-        text_clean, re.IGNORECASE,
-    )
-    if asym_range_dm:
-        d1, m1, d2, m2, y2 = asym_range_dm.groups()
-        m1n = _MONTH_MAP.get(m1.lower(), 0)
-        m2n = _MONTH_MAP.get(m2.lower(), 0)
-        if m1n and m2n:
-            start = datetime(int(y2), m1n, int(d1))  # 年份从后半推断
-            end = datetime(int(y2), m2n, int(d2), 23, 59, 59)
-            return start, end
+    def _day_end(dt: datetime) -> datetime:
+        return dt.replace(hour=23, minute=59, second=59, microsecond=0)
 
-    # --- 尝试 3: 跨月区间（前半缺年份）"Month DD — Month DD YYYY" ---
-    asym_range_md = re.match(
-        rf'({month_names})\s+(\d{{1,2}})\s*[-–—]+\s*({month_names})\s+(\d{{1,2}}),?\s*(\d{{4}})',
-        text_clean, re.IGNORECASE,
-    )
-    if asym_range_md:
-        m1, d1, m2, d2, y2 = asym_range_md.groups()
-        m1n = _MONTH_MAP.get(m1.lower(), 0)
-        m2n = _MONTH_MAP.get(m2.lower(), 0)
-        if m1n and m2n:
-            start = datetime(int(y2), m1n, int(d1))
-            end = datetime(int(y2), m2n, int(d2), 23, 59, 59)
-            return start, end
+    # --- 尝试 1: 按 em/en dash 拆成前后两段 ---
+    # 只用 em/en dash 切分：普通连字符属于日期内部（如 "Jul 3-5, 2026"），不能当分隔符
+    halves = [h.strip() for h in re.split(r'\s*[—–]\s*', text) if h.strip()]
+    start = _to_dt(halves[0]) if halves else None
+    end = _to_dt(halves[-1]) if len(halves) >= 2 else None
+    if start and end:
+        return start, _day_end(end)
 
-    # --- 尝试 4: 同月区间（前半缺年份）"DD-DD Month YYYY" ---
-    asym_same_month = re.match(
-        rf'(\d{{1,2}})\s*[-–]\s*(\d{{1,2}})\s+({month_names}),?\s*(\d{{4}})',
-        text_clean, re.IGNORECASE,
-    )
-    if asym_same_month:
-        d1, d2, m, y = asym_same_month.groups()
-        mn = _MONTH_MAP.get(m.lower(), 0)
-        if mn:
-            start = datetime(int(y), mn, int(d1))
-            end = datetime(int(y), mn, int(d2), 23, 59, 59)
-            return start, end
+    # --- 尝试 2: 同月区间 "Month DD-DD, YYYY" ---
+    month_first = re.search(r'([A-Za-z]{3,9})\.?\s+(\d{1,2})\s*-\s*(\d{1,2}),?\s*(\d{4})', text)
+    if month_first:
+        mon, d1, d2, yr = month_first.groups()
+        s, e = _to_dt(f"{mon} {d1} {yr}"), _to_dt(f"{mon} {d2} {yr}")
+        if s and e:
+            return s, _day_end(e)
 
-    # --- 尝试 5: 同月区间 "Month DD-DD, YYYY" ---
-    same_month_range = re.match(
-        rf'({month_names})\s+(\d{{1,2}})\s*[-–]\s*(\d{{1,2}}),?\s*(\d{{4}})',
-        text_clean, re.IGNORECASE,
-    )
-    if same_month_range:
-        m, d1, d2, y = same_month_range.groups()
-        mn = _MONTH_MAP.get(m.lower(), 0)
-        if mn:
-            start = datetime(int(y), mn, int(d1))
-            end = datetime(int(y), mn, int(d2), 23, 59, 59)
-            return start, end
+    # --- 尝试 3: 同月区间 "DD-DD Month, YYYY" ---
+    day_first = re.search(r'(\d{1,2})\s*-\s*(\d{1,2})\s+([A-Za-z]{3,9})\.?\s*,?\s*(\d{4})', text)
+    if day_first:
+        d1, d2, mon, yr = day_first.groups()
+        s, e = _to_dt(f"{mon} {d1} {yr}"), _to_dt(f"{mon} {d2} {yr}")
+        if s and e:
+            return s, _day_end(e)
 
-    # --- 尝试 6: 单日 "Month DD, YYYY" ---
-    single_md = re.match(
-        rf'({month_names})\s+(\d{{1,2}}),?\s*(\d{{4}})',
-        text_clean, re.IGNORECASE,
-    )
-    if single_md:
-        mn = _MONTH_MAP.get(single_md.group(1).lower(), 0)
-        if mn:
-            start = datetime(int(single_md.group(3)), mn, int(single_md.group(2)))
-            return start, None
-
-    # --- 尝试 7: 单日 "DD Month, YYYY" ---
-    single_dm = re.match(
-        rf'(\d{{1,2}})\s+({month_names}),?\s*(\d{{4}})',
-        text_clean, re.IGNORECASE,
-    )
-    if single_dm:
-        mn = _MONTH_MAP.get(single_dm.group(2).lower(), 0)
-        if mn:
-            start = datetime(int(single_dm.group(3)), mn, int(single_dm.group(1)))
-            return start, None
-
-    return None, None
+    # --- 尝试 4: 单日 ---
+    return start, end
 
 
 def _try_parse_event_time(event: dict, key: str) -> Optional[datetime]:
@@ -249,12 +226,18 @@ def _try_parse_date_text(date_text: str, *, as_end: bool = False) -> Optional[da
     return start_dt
 
 
+def _as_utc(dt: datetime) -> datetime:
+    """统一为 aware UTC：naive 视为 UTC（CTFtime 页面时间均为 UTC 语义）。
+    否则 naive(UTC) 与本地 naive now 比较会有 8 小时偏差，aware 与 naive 比较更会直接抛 TypeError。"""
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
 def compute_status(event: dict) -> str:
     """
     根据 start_time / end_time 计算赛事状态。
     当时间完全不可解析时返回 "unknown"（会被过滤掉）。
     """
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
 
     # 1) 优先从 ISO 字段解析
     start_dt = _try_parse_event_time(event, "start_time")
@@ -271,6 +254,10 @@ def compute_status(event: dict) -> str:
     # 4) 仍然无法确定时间 → unknown（会被下游过滤）
     if start_dt is None:
         return "unknown"
+
+    start_dt = _as_utc(start_dt)
+    if end_dt is not None:
+        end_dt = _as_utc(end_dt)
 
     # 5) 已结束
     if end_dt and end_dt < now:
@@ -310,17 +297,29 @@ def parse_event_row(cols) -> Optional[dict]:
 
     date_text = cols[1].text.strip()
 
-    # ---- 策略 1: 从 <span data-utc> 提取 ISO 时间戳 ----
+    # ---- 策略 1: 从 <span> 的显式时间属性提取 ISO 时间戳 ----
     start_time = None
     end_time = None
     for span in cols[1].find_all("span"):
+        # 显式成对属性（部分页面结构提供 data-start / data-end）
+        for raw_val, is_end in ((span.get("data-start"), False), (span.get("data-end"), True)):
+            if raw_val:
+                try:
+                    dt = datetime.fromisoformat(str(raw_val).replace("Z", "+00:00"))
+                    if is_end:
+                        end_time = dt.isoformat()
+                    elif start_time is None:
+                        start_time = dt.isoformat()
+                except (ValueError, TypeError):
+                    pass
+        # 顺序兜底（data-utc / title：第一个给 start，第二个给 end）
         utc = span.get("data-utc") or span.get("title", "")
         if utc:
             try:
-                dt = datetime.fromisoformat(utc.replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(str(utc).replace("Z", "+00:00"))
                 if start_time is None:
                     start_time = dt.isoformat()
-                else:
+                elif end_time is None:
                     end_time = dt.isoformat()
             except (ValueError, TypeError):
                 pass
@@ -482,6 +481,8 @@ def refresh_cache() -> dict:
         if e["status"] == "unknown":
             e["status"] = "upcoming"
             upcoming_unknown += 1
+        # 采集边界：缓存只收 14 天窗口内的赛事（expired 不入库）；
+        # "已结束"的展示由读取路径现算状态负责，采集与展示职责分离。
         if e["status"] != "expired":
             seen_ids.add(e["id"])
             all_events.append(e)
@@ -511,6 +512,7 @@ def refresh_cache() -> dict:
             if e["id"] in seen_ids:
                 continue
             e["status"] = compute_status(e)
+            # 采集边界：同 upcoming 侧，只收 14 天窗口内的有效赛事
             if e["status"] in ("expired", "unknown"):
                 continue
             seen_ids.add(e["id"])
@@ -567,6 +569,27 @@ def refresh_cache() -> dict:
 
 # ============ 异步刷新（后台线程）============
 
+def _start_refresh_thread() -> bool:
+    """
+    启动后台刷新线程（若当前无刷新进行中）。
+    返回 True 表示成功启动；False 表示已有刷新在运行。
+    """
+    with _refresh_lock:
+        if _refresh_state["running"]:
+            return False
+        _refresh_state["running"] = True
+        _refresh_state["phase"] = "正在启动刷新..."
+        _refresh_state["message"] = ""
+    threading.Thread(target=_do_async_refresh, daemon=True).start()
+    return True
+
+
+def is_refreshing() -> bool:
+    """当前是否有刷新线程在运行"""
+    with _refresh_lock:
+        return _refresh_state["running"]
+
+
 def _do_async_refresh():
     """后台执行刷新，完成后更新全局状态"""
     global _refresh_state
@@ -599,28 +622,64 @@ async def get_events(
         description="排序: default | weight_desc | weight_asc | format_jeopardy | format_ad | format_hackquest"),
     format_filter: Optional[str] = Query(None, description="赛制过滤，逗号分隔"),
     min_weight: float = Query(0.0, description="最低权重过滤"),
-    status_filter: Optional[str] = Query(None, description="状态过滤: upcoming | running | recently_ended"),
+    status_filter: Optional[str] = Query(None, description="状态过滤: upcoming | running | recently_ended | expired"),
 ):
-    """获取 CTF 赛事列表（优先读缓存，必要时自动刷新）"""
+    """获取 CTF 赛事列表（优先读缓存，缓存过期时触发后台线程刷新，绝不阻塞事件循环）"""
     if should_refresh():
-        logger.info("缓存已过期（超过今日 12:00），触发自动刷新")
-        # 同步刷新（get_events 自动刷新仍为同步，避免前端等待过久的问题交由 /refresh 解决）
-        refresh_cache()
+        # 缓存已过期（超过今日 12:00）：后台线程刷新，立即返回现有缓存。
+        # 严禁在 async 路由里同步调 refresh_cache()——多页抓取 + time.sleep 会卡死整个事件循环，
+        # 导致 CTF 刷新期间所有 API/WebSocket 全部冻结。
+        if _start_refresh_thread():
+            logger.info("缓存已过期（超过今日 12:00），已触发后台自动刷新")
 
     cache_data = load_cache()
     events: List[dict] = cache_data.get("events", [])
     last_refresh = cache_data.get("last_refresh")
 
-    # ---- 兜底：旧缓存可能缺少 status 字段，补算 ----
-    recomputed = 0
+    # ---- 兜底：修复旧缓存的时间字段 ----
+    # ① start_time 仍是原始纯文本（如 "18 Sept., 04:30 UTC — ..."）
+    # ② start=T00:00:00 + end=T23:59:59 的"整天占位"值（旧解析丢弃了时刻、end 被膨胀）
+    #    仅当原始 date 文本里确实带 HH:MM 时才重解析，避免误伤真·全天赛事
+    repaired = 0
     for e in events:
-        if not e.get("status") or e["status"] not in ("upcoming", "running", "recently_ended", "expired", "unknown"):
-            e["status"] = compute_status(e)
-            recomputed += 1
-    if recomputed:
-        logger.info(f"补算 {recomputed} 条缺失/无效 status 的事件")
+        st = e.get("start_time")
+        et = e.get("end_time")
+        date_text = e.get("date") or ""
 
-    # ---- v5 新增：过滤掉 unknown 状态（时间完全不可解析的脏数据）----
+        dirty = bool(st and isinstance(st, str) and not st[:4].isdigit())
+        if not dirty and isinstance(st, str) and st.endswith("T00:00:00"):
+            if isinstance(et, str) and et.endswith("T23:59:59") and _CLOCK_RE.search(date_text):
+                dirty = True
+        if not dirty:
+            continue
+
+        new_start, new_end = _parse_ctftime_date(date_text or st)
+        if new_start:
+            e["start_time"] = new_start.isoformat()
+            e["end_time"] = new_end.isoformat() if new_end else e.get("end_time")
+            e["status"] = compute_status(e)
+            repaired += 1
+    if repaired:
+        logger.info(f"旧缓存修复：重解析 {repaired} 条时间字段并回写缓存")
+        cache_data["events"] = events
+        save_cache(cache_data)
+
+    # ---- 读取时重算状态：缓存里的 status 只是抓取那一刻的快照 ----
+    # running → recently_ended → expired 的迁移就地完成，避免"实际已结束
+    # 多日仍显示进行中/近期结束"。重算得 unknown（时间不可解析）时保留缓存值——
+    # upcoming 页脏数据在 refresh 时已被宽容为 upcoming，读取时不能反杀。
+    migrated = 0
+    for e in events:
+        fresh = compute_status(e)
+        if fresh != "unknown" and fresh != e.get("status"):
+            e["status"] = fresh
+            migrated += 1
+    if migrated:
+        logger.info(f"读取时状态迁移 {migrated} 条（running→recently_ended→expired 等）")
+
+    # ---- 过滤 unknown（时间完全不可解析的脏数据）----
+    # expired 是合法第四态（结束超过 14 天），有意放行展示为"已结束"，
+    # 直到下一次 refresh 按 14 天保留窗口将其清出缓存。
     unknown_filtered = sum(1 for e in events if e["status"] == "unknown")
     events = [e for e in events if e["status"] != "unknown"]
     if unknown_filtered:
@@ -663,7 +722,7 @@ async def get_events(
 
     def sort_key(event: dict):
         s = event.get("status", "")
-        status_prio = {"upcoming": 0, "running": 1, "recently_ended": 2}
+        status_prio = {"upcoming": 0, "running": 1, "recently_ended": 2, "expired": 3}
 
         if sort == "weight_desc":
             return (-event["weight"], _sortable_time(event, "start_time"))
@@ -679,8 +738,8 @@ async def get_events(
             fmt_order = 0 if event["format"] == "Hack quest" else 1
             return (fmt_order, -event["weight"], _sortable_time(event, "start_time"))
         else:
-            # default: upcoming 从近到远 → running → recently_ended 最近结束在前
-            if s == "recently_ended":
+            # default: upcoming 从近到远 → running → recently_ended → expired（后两者最近结束在前）
+            if s in ("recently_ended", "expired"):
                 end_dt = _try_parse_event_time(event, "end_time")
                 if end_dt is None:
                     end_dt = _try_parse_date_text(event.get("date", ""), as_end=True)
@@ -700,6 +759,7 @@ async def get_events(
         "total": len(sorted_events),
         "pinned_count": len(pinned),
         "last_refresh": last_refresh,
+        "refreshing": is_refreshing(),
     }
 
 
@@ -709,19 +769,12 @@ async def force_refresh():
     v5 异步刷新：立即返回 "刷新已启动"，后台线程执行实际抓取。
     前端通过 GET /refresh/status 轮询进度。
     """
-    with _refresh_lock:
-        if _refresh_state["running"]:
-            return {
-                "success": True,
-                "refreshing": True,
-                "message": "刷新正在进行中，请稍候...",
-            }
-        _refresh_state["running"] = True
-        _refresh_state["phase"] = "正在启动刷新..."
-        _refresh_state["message"] = ""
-
-    thread = threading.Thread(target=_do_async_refresh, daemon=True)
-    thread.start()
+    if not _start_refresh_thread():
+        return {
+            "success": True,
+            "refreshing": True,
+            "message": "刷新正在进行中，请稍候...",
+        }
 
     return {
         "success": True,

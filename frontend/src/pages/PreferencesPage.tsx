@@ -46,7 +46,7 @@ const PreferencesPage: React.FC = () => {
     setSaving(true);
     setMessage("");
     try {
-      const res = await preferencesApi.update(Array.from(selected));
+      await preferencesApi.update(Array.from(selected));
       setMessage(`偏好已保存: ${Array.from(selected).join(", ") || "全部类别"}`);
     } catch (e) {
       setMessage(`保存失败: ${(e as Error).message}`);

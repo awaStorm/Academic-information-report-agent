@@ -6,6 +6,11 @@ import time
 import sys
 import io
 
+try:
+    from src.processors.extractors.content_extractor import extract_links, merge_links
+except ImportError:  # 直接以脚本方式运行时的兜底导入
+    from content_extractor import extract_links, merge_links
+
 class WechatParser:
     """微信内容解析器"""
     # 计算项目根目录的路径 (src/processor/extractors 是三级目录)
@@ -20,7 +25,8 @@ class WechatParser:
     
     def parse_single_article(self, url):
         """
-        最小化解析：只负责把文字扣出来
+        解析微信正文：提取文本、内嵌 <a> 链接、图片 URL。
+        返回 (正文文本, 内嵌链接列表, 图片 URL 列表)
         """
         try:
             # 增加基础 UA，防止最简单的拦截
@@ -29,20 +35,38 @@ class WechatParser:
             }
             res = requests.get(url, headers=headers, timeout=15)
             res.encoding = 'utf-8' # 微信原文强制 utf-8
-            
+
             soup = BeautifulSoup(res.text, 'html.parser')
-            
+
             # 微信正文容器 ID 极为固定
             content_area = soup.find(id="js_content")
-            
+
             if content_area:
+                # 收集正文内嵌链接（公众号文章里的报名表单、相关通知等 <a href>）
+                anchor_links = []
+                for a in content_area.find_all("a", href=True):
+                    href = (a.get("href") or "").strip()
+                    if href.startswith("//"):
+                        href = "https:" + href  # 微信常见协议相对形式
+                    if href.startswith(("http://", "https://")):
+                        anchor_links.append(href)
+
+                # 收集正文图片 URL（微信正文图片常用 data-src 懒加载，也可能直接用 src）
+                image_urls = []
+                for img in content_area.find_all("img"):
+                    src = (img.get("data-src") or img.get("src") or "").strip()
+                    if src.startswith("//"):
+                        src = "https:" + src
+                    if src.startswith(("http://", "https://")) and src not in image_urls:
+                        image_urls.append(src)
+
                 # get_text(separator='\n') 会保留标签间的换行，非常实用
-                return content_area.get_text(separator='\n', strip=True)
+                return content_area.get_text(separator='\n', strip=True), anchor_links, image_urls
             else:
-                return "(未找到正文内容)"
-                
+                return "(未找到正文内容)", [], []
+
         except Exception as e:
-            return f"(解析异常: {str(e)})"
+            return f"(解析异常: {str(e)})", [], []
     
     def run_parser(self, progress_callback=None):
         if not os.path.exists(self.INPUT_FILE):
@@ -68,12 +92,12 @@ class WechatParser:
                 except Exception:
                     pass
             
-            # 核心抓取动作
-            full_body = self.parse_single_article(link)
-            
+            # 核心抓取动作（正文 + 内嵌链接 + 图片）
+            full_body, anchor_links, image_urls = self.parse_single_article(link)
+
             # 时间转换：wechat_scraper 给的是 update_time (秒级时间戳)
             formatted_date = time.strftime("%Y-%m-%d %H:%M", time.localtime(item.get("update_time", time.time())))
-            
+
             # 构建精简版对象
             refined_item = {
                 "id": str(item.get("aid", item.get("appmsgid"))), # 微信的唯一 ID
@@ -82,7 +106,11 @@ class WechatParser:
                 "title": title.strip(),
                 "date": formatted_date,
                 "body": full_body,
-                "link": link
+                "link": link,
+                # 扩展链接：本体链接优先，正文内嵌 <a> 与正文纯文本 URL 紧随其后
+                "links": merge_links([link] if link else [], anchor_links, extract_links(full_body)),
+                # 正文图片 URL（供多模态识图提取图片中的日期/文字/二维码）
+                "images": image_urls,
             }
             
             refined_data.append(refined_item)
