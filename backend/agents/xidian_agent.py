@@ -21,7 +21,7 @@ load_dotenv()
 from backend.core.base_agent import BaseAgent
 from backend.ws.connection_manager import manager
 from tools_config import TOOLS_METADATA, execute_tool
-from src.utils.config_loader import CONFIG
+from src.utils.config_loader import CONFIG, get_identity_prompt, get_display_name as cfg_display_name
 from src.utils.llm_client import (
     build_llm_client,
     call_with_retry,
@@ -29,11 +29,11 @@ from src.utils.llm_client import (
     is_connection_error,
 )
 
-logger = logging.getLogger("backend.xidian_agent")
+logger = logging.getLogger("backend.agent")
 
 
 class XidianAgent(BaseAgent):
-    """西电校园情报 Agent（适配 BaseAgent 接口）"""
+    """校园情报 Agent（适配 BaseAgent 接口；类名与 agent 名 xidian 保留为路由兼容别名）"""
 
     def __init__(self):
         api_key = os.getenv("LLM_API_KEY")
@@ -52,13 +52,13 @@ class XidianAgent(BaseAgent):
         # 工具调用轮次上限：防止 LLM 陷入「扫码→重抓→仍失败→再扫码」无限循环烧 token
         self.MAX_TOOL_ROUNDS = 15
         self._init_system_prompt()
-        logger.info(f"✅ XidianAgent 初始化完成，模型: {self.model}")
+        logger.info(f"✅ 校园情报 Agent 初始化完成，模型: {self.model}")
 
     def _init_system_prompt(self):
         self.system_prompt = {
             "role": "system",
             "content": (
-                "你是西安电子科技大学的【校园情报 Agent】。\n"
+                get_identity_prompt() + "\n"
                 "你有权访问超星通知、微信公众号数据、本地数据库以及推送工具。\n\n"
                 "## 执行准则\n"
                 "1. 链路逻辑：采集 -> 处理 -> 解析 -> 合流 -> 分析 -> 推送。\n"
@@ -70,6 +70,7 @@ class XidianAgent(BaseAgent):
                 "7. 采集失败必须如实区分：run_wechat_scraper 返回 success=false 时严禁说成'没有新情报'，需按 error_type 说明真实原因——SESSION_EXPIRED/AUTH 需扫码；RATE_LIMITED 为限流（稍后重试即可，无需扫码）；SOURCE_UNAVAILABLE/NOT_FOUND 为数据源异常或目标号未被收录。只有 success=true 且 count=0 才是'确实没有新文章'。返回值含 failed_targets 时，需告知用户哪些公众号失败及原因。\n"
                 "8. 尊重用户的显式指令：如果用户明确要求「扫码登录」「重试」「再抓一次」，即使你判断可能无效，也必须照办——可以先说明你的判断，但不得替用户拒绝，更不得以'这样做没用'为由不执行。\n"
                 "9. 回复简洁：先给结论与关键事实（失败数量、error_type、错误码等可核验信息），再给必要说明；同一个结论只讲一次，不反复论证、不长篇铺垫。\n"
+                "10. 信源扩展：当用户要求适配不同学校、寻找特定竞赛/通知渠道、或自定义信源时，用 discover_source_cards 生成候选卡片（网站大卡片+公众号小卡片），用 list_source_cards 查看，用 add_card_to_checklist 加入检查清单，用 remove_card 删除。信源不局限于超星/微信预设；网站卡片会在生成时做可达性验证，未验证的如实告知用户由其决定。生成后不要擅自把所有卡片都加入清单，先让用户确认。\n"
             )
         }
 
@@ -112,7 +113,7 @@ class XidianAgent(BaseAgent):
         return "xidian"
 
     def get_display_name(self) -> str:
-        return "西电校园情报助手"
+        return cfg_display_name()
 
     def get_description(self) -> str:
         return "负责校园情报采集、分析与推送，支持超星通知和微信公众号"
@@ -411,13 +412,34 @@ class XidianAgent(BaseAgent):
             except Exception:
                 pass
 
-        await self._send_log(session_id, "status", "📡 开始采集...")
-        await asyncio.to_thread(Scraper().fetch_and_save, progress_callback=_progress_callback)
-        # 微信采集结果必须上报：失败要可见，不能与「确实没有新文章」混为一谈
-        wx_result = await asyncio.to_thread(
-            WechatScraper().run_scraper_flow, progress_callback=_progress_callback)
-        await self._report_wechat_result(session_id, wx_result)
+        # 系统内置卡片（超星/微信）的启用状态来自检查清单，停用后跳过对应采集内核
+        from src.utils.source_store import list_checklist
+        enabled_ids = {
+            i["card"]["id"] for i in list_checklist()
+            if i["enabled"] and i["card"]["enabled"]
+        }
+        chaoxing_on = "system-chaoxing" in enabled_ids
+        wechat_on = "system-wechat_system" in enabled_ids
 
+        await self._send_log(session_id, "status", "📡 开始采集...")
+        if chaoxing_on:
+            await asyncio.to_thread(Scraper().fetch_and_save, progress_callback=_progress_callback)
+        else:
+            await self._send_log(session_id, "status", "ℹ️ 超星信源已停用，跳过采集")
+        wx_result = (await asyncio.to_thread(
+            WechatScraper().run_scraper_flow, progress_callback=_progress_callback)
+            if wechat_on else {"success": True, "count": 0, "message": "微信信源已停用，跳过采集"})
+        # 微信采集结果必须上报：失败要可见，不能与「确实没有新文章」混为一谈
+        if wechat_on:
+            await self._report_wechat_result(session_id, wx_result)
+
+        # 按信源卡片的检查清单顺序抓取通用网站信源（清单为空会静默跳过）
+        from src.collectors.scrapers.generic_scraper import run_generic_scraper
+        generic_result = await asyncio.to_thread(
+            run_generic_scraper, progress_callback=_progress_callback)
+        if not generic_result.get("skipped"):
+            await self._send_log(session_id, "status",
+                                 f"🌐 {generic_result.get('message')}")
         await self._send_log(session_id, "status", "🧹 开始处理...")
         await asyncio.to_thread(WechatParser().run_parser, progress_callback=_progress_callback)
         await asyncio.to_thread(DataProcessor().run, progress_callback=_progress_callback)
@@ -445,11 +467,23 @@ class XidianAgent(BaseAgent):
         from src.collectors.scrapers.scraper import Scraper
         from src.collectors.scrapers.wechat_scraper import WechatScraper
 
+        from src.utils.source_store import list_checklist
+        from src.collectors.scrapers.generic_scraper import run_generic_scraper
+        enabled_ids = {
+            i["card"]["id"] for i in list_checklist()
+            if i["enabled"] and i["card"]["enabled"]
+        }
         await self._send_log(session_id, "status", "📡 开始采集...")
         # 同 _run_full_flow：同步长任务必须放线程池，否则 Playwright Sync API 会直接报错
-        await asyncio.to_thread(Scraper().fetch_and_save)
-        wx_result = await asyncio.to_thread(WechatScraper().run_scraper_flow)
+        if "system-chaoxing" in enabled_ids:
+            await asyncio.to_thread(Scraper().fetch_and_save)
+        wx_result = (await asyncio.to_thread(WechatScraper().run_scraper_flow)
+                     if "system-wechat_system" in enabled_ids
+                     else {"success": True, "count": 0, "message": "微信信源已停用"})
         await self._report_wechat_result(session_id, wx_result)
+        generic_result = await asyncio.to_thread(run_generic_scraper)
+        if not generic_result.get("skipped"):
+            await self._send_log(session_id, "status", f"🌐 {generic_result.get('message')}")
 
         # 采集阶段的结果如实回传：微信失败不算「采集完成」
         wx_ok = isinstance(wx_result, dict) and bool(wx_result.get("success"))

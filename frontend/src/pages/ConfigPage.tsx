@@ -2,10 +2,29 @@
  * frontend/src/pages/ConfigPage.tsx - 配置面板页面
  */
 import React, { useState, useEffect } from "react";
-import { Save, Clock, Cpu, Send, Plus, X, Radio } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Save, Clock, Cpu, Send, Radio, GraduationCap, ExternalLink, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { configApi, ConfigData } from "../api/config";
 
+// 侧边栏栏目（与 Layout.tsx 的 navItems 对应）；配置面板不可隐藏，避免被锁在门外
+const NAV_ITEMS = [
+  { to: "/dashboard", label: "情报仪表盘" },
+  { to: "/preferences", label: "偏好设置" },
+  { to: "/reports", label: "情报报告" },
+  { to: "/ctf", label: "CTF 时间表" },
+  { to: "/calendar", label: "事件日历" },
+  { to: "/source-cards", label: "信源雷达" },
+  { to: "/agents/xidian/chat", label: "Agent 对话" },
+];
+
 const defaultConfig: ConfigData = {
+  profile: {
+    school_name: "",
+    assistant_display_name: "校园情报助手",
+    probe_query: "",
+    report_title: "校园情报提醒",
+    identity_prompt: "你是【校园情报 Agent】，负责校园资讯的采集、筛选与推送。{school_context}",
+  },
   llm_api_key: "",
   llm_base_url: "",
   llm_model: "",
@@ -22,6 +41,7 @@ const defaultConfig: ConfigData = {
   run_times: ["08:00"],
   failure_alert_threshold: 3,
   dashboard_page_size: 20,
+  hidden_nav: [],
   multimodal_enabled: false,
   multimodal_api_key: "",
   multimodal_base_url: "",
@@ -34,7 +54,13 @@ const ConfigPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-  const [newTarget, setNewTarget] = useState("");
+  const navigate = useNavigate();
+
+  const toggleNav = (to: string) => {
+    const hidden = new Set(config.hidden_nav || []);
+    hidden.has(to) ? hidden.delete(to) : hidden.add(to);
+    setConfig({ ...config, hidden_nav: Array.from(hidden) });
+  };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -56,7 +82,10 @@ const ConfigPage: React.FC = () => {
     setSaving(true);
     setMessage("");
     try {
-      const res = await configApi.update(config);
+      // targets 由信源雷达统一管理，配置面板只读展示，保存时不回传，避免覆盖雷达写回的目标
+      const { wechat_targets: _ignored, ...payload } = config;
+      void _ignored;
+      const res = await configApi.update(payload);
       setMessage(res.message || "保存成功");
     } catch (e) {
       setMessage(`保存失败: ${(e as Error).message}`);
@@ -74,23 +103,6 @@ const ConfigPage: React.FC = () => {
     }
   };
 
-  const handleAddTarget = () => {
-    const name = newTarget.trim().replace(/[,，]/g, "");
-    if (!name) return;
-    if (config.wechat_targets.includes(name)) {
-      setMessage(`"${name}" 已在列表中`);
-      return;
-    }
-    setConfig({ ...config, wechat_targets: [...config.wechat_targets, name] });
-    setNewTarget("");
-    setMessage("");
-  };
-
-  const handleRemoveTarget = (name: string) => {
-    setConfig({ ...config, wechat_targets: config.wechat_targets.filter((t) => t !== name) });
-    setMessage("");
-  };
-
   if (loading) return <div className="text-gray-500">加载中...</div>;
 
   return (
@@ -98,6 +110,44 @@ const ConfigPage: React.FC = () => {
       <div>
         <h2 className="text-xl font-bold text-white">配置面板</h2>
         <p className="text-sm text-gray-500 mt-1">管理系统配置与推送渠道</p>
+      </div>
+
+      <div className="bg-dark-card/60 border border-white/5 rounded-xl p-4 space-y-3">
+        <h3 className="text-sm font-semibold text-accent-primary flex items-center gap-2">
+          <GraduationCap size={16} /> 身份与展示（面向任意学校）
+        </h3>
+        <p className="text-[11px] text-gray-500 leading-relaxed">
+          留空即通用模式，不绑定任何学校。学校名会注入 Agent 提示词与检索探活；显示名用于侧边栏与推送标题。
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">学校名称（留空=通用）</label>
+            <input type="text" placeholder="如：XX 大学（留空则面向所有学校）"
+              className="input-field w-full" value={config.profile.school_name}
+              onChange={(e) => setConfig({ ...config, profile: { ...config.profile, school_name: e.target.value } })} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">助手显示名</label>
+            <input type="text" className="input-field w-full" value={config.profile.assistant_display_name}
+              onChange={(e) => setConfig({ ...config, profile: { ...config.profile, assistant_display_name: e.target.value } })} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">检索探活关键词（留空=用学校名）</label>
+            <input type="text" placeholder="留空自动使用学校名"
+              className="input-field w-full" value={config.profile.probe_query}
+              onChange={(e) => setConfig({ ...config, profile: { ...config.profile, probe_query: e.target.value } })} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">简报/推送标题前缀</label>
+            <input type="text" className="input-field w-full" value={config.profile.report_title}
+              onChange={(e) => setConfig({ ...config, profile: { ...config.profile, report_title: e.target.value } })} />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">身份提示词模板（{"{school_context}"} 会替换为学校说明）</label>
+          <textarea rows={2} className="input-field w-full resize-y" value={config.profile.identity_prompt}
+            onChange={(e) => setConfig({ ...config, profile: { ...config.profile, identity_prompt: e.target.value } })} />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-6">
@@ -195,37 +245,27 @@ const ConfigPage: React.FC = () => {
             </div>
           </div>
 
-          {/* 公众号管理 */}
-          <h3 className="text-sm font-semibold text-gray-400 flex items-center gap-2 pt-2">
-            <Radio size={16} /> 公众号管理
-          </h3>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="输入公众号名称后点击添加"
-              className="input-field flex-1"
-              value={newTarget}
-              onChange={(e) => setNewTarget(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleAddTarget(); }}
-            />
-            <button className="btn-primary text-xs px-3 whitespace-nowrap" onClick={handleAddTarget}>
-              <Plus size={14} className="inline mr-1" />添加
+          {/* 公众号监控目标（只读镜像，唯一入口在信源雷达） */}
+          <div className="flex items-center justify-between pt-2">
+            <h3 className="text-sm font-semibold text-gray-400 flex items-center gap-2">
+              <Radio size={16} /> 公众号监控目标
+            </h3>
+            <button className="btn-secondary text-[11px] px-2 py-1 flex items-center gap-1"
+              onClick={() => navigate("/source-cards")}>
+              去信源雷达管理 <ExternalLink size={12} />
             </button>
           </div>
+          <p className="text-[11px] text-gray-600 leading-relaxed">
+            此处只读展示当前微信内核的检查目标。增删公众号请在「信源雷达」手动新建公众号卡片（支持直接填公众号名称），
+            或让 AI 生成后加入清单/容器，目标会自动同步到这里。
+          </p>
           {config.wechat_targets.length === 0 ? (
-            <div className="text-xs text-gray-600 py-2">暂无公众号，请在上方输入名称后点击添加</div>
+            <div className="text-xs text-gray-600 py-2">暂无公众号监控目标</div>
           ) : (
             <div className="flex flex-wrap gap-1.5 mt-1">
               {config.wechat_targets.map((target) => (
-                <span key={target} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-dark-card border border-white/10 text-gray-300">
+                <span key={target} className="text-xs px-2 py-1 rounded bg-dark-card border border-white/10 text-gray-300">
                   {target}
-                  <button
-                    className="text-gray-600 hover:text-red-400 transition-colors"
-                    onClick={() => handleRemoveTarget(target)}
-                    title={`移除 ${target}`}
-                  >
-                    <X size={12} />
-                  </button>
                 </span>
               ))}
             </div>
@@ -269,6 +309,30 @@ const ConfigPage: React.FC = () => {
           <input type="text" placeholder="运行时间 (逗号分隔)" className="input-field w-full"
             value={config.run_times.join(",")}
             onChange={(e) => setConfig({ ...config, run_times: e.target.value.split(",").map(s => s.trim()).filter(Boolean) })} />
+
+          {/* 侧边栏栏目显隐（按钮制） */}
+          <h3 className="text-sm font-semibold text-gray-400 flex items-center gap-2 pt-2">
+            <PanelLeftClose size={16} /> 侧边栏栏目
+          </h3>
+          <p className="text-[11px] text-gray-600 leading-relaxed">
+            点击按钮撤下/恢复栏目（撤下后侧边栏不再显示，页面仍可访问；配置面板不可撤下）。保存后生效。
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {NAV_ITEMS.map((item) => {
+              const hidden = (config.hidden_nav || []).includes(item.to);
+              return (
+                <button key={item.to} onClick={() => toggleNav(item.to)}
+                  className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border transition-colors ${
+                    hidden
+                      ? "text-gray-600 border-white/5 bg-white/[0.02] line-through"
+                      : "text-gray-300 border-white/10 bg-white/5 hover:border-accent-primary/40"
+                  }`}>
+                  {hidden ? <PanelLeftClose size={11} /> : <PanelLeftOpen size={11} />}
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

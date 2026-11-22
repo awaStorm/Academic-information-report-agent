@@ -72,6 +72,17 @@ class SchedulerService:
         logger.info(f"⏰ 定时任务开始执行 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         self.last_run_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
+            # 扫描检查清单：按卡片顺序抓取通用网站信源（清单为空则静默跳过）
+            from src.collectors.scrapers.generic_scraper import run_generic_scraper
+            generic_result = run_generic_scraper()
+            if not generic_result.get("skipped"):
+                logger.info(f"通用信源扫描: {generic_result.get('message')}")
+                # 抓取结果必须合入 full_intelligence_stream，分析层才读得到
+                from src.processors.mergers.final_merger import FinalMerger
+                merge_result = FinalMerger().merge_intelligence()
+                if merge_result.get("success"):
+                    logger.info(f"通用信源已合流: {merge_result.get('count')} 条")
+            # 公众号 targets 由信源卡片工作台写回，微信采集链无需在此重复处理
             result = run_analysis_flow()
             success = result.get("success", False) if isinstance(result, dict) else bool(result)
             if success:

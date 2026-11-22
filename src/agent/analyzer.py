@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from src.agent.database import AgentMemory
 from src.agent.pusher import Pusher
 from src.processors.extractors.content_extractor import merge_links
-from src.utils.config_loader import CONFIG
+from src.utils.config_loader import CONFIG, get_identity_prompt, get_report_title, get_display_name
 from src.utils.llm_client import build_llm_client, call_with_retry
 
 # 1. 加载环境变量与配置
@@ -295,7 +295,7 @@ def generate_report(already_pushed_titles: list = None):
 """
 
     system_instruction = f"""
-你是西安电子科技大学的【校园情报筛选与提取 Agent】。
+{get_identity_prompt()}现在执行【校园情报筛选与提取 Agent】的具体任务。
 当前日期：{today_str}
 {pushed_hint}
 ## 任务目标
@@ -329,7 +329,7 @@ def generate_report(already_pushed_titles: list = None):
    - 平台：直接取原始数据的"平台"字段值（wechat 或 chaoxing）
    - 账号名：直接取原始数据的"账号"字段值（即发布该消息的公众号/通知源名称），不要替换或改写
    - 如果你想补充更细粒度的来源信息（如具体工作室、部门等），在账号名后用中文括号标注
-   - 示例：wechat:校团委、chaoxing:教务处、wechat:西电社团（POD影音工作室）
+   - 示例：wechat:校团委、chaoxing:教务处
 2. deadline 字段：必须是 YYYY-MM-DD 格式（如 2026-06-28），如果无法提取具体日期则为 null
 3. link 字段：如果原数据中有完整的 http/https 链接则填入，否则留空字符串。绝对不要填入 ID、数字或其他非 URL 内容。
 4. event_date 字段：YYYY-MM-DD 或 null
@@ -386,7 +386,7 @@ def render_markdown(res_data, date_str):
     pushed = res_data.get("pushed_items", [])
     filtered = res_data.get("filtered_items", [])
 
-    md = f"# 📅 西电校园情报简报 | {date_str}\n\n"
+    md = f"# 📅 {get_report_title()} | {date_str}\n\n"
     md += "## ⚠️ 今日核心提醒\n"
 
     if not pushed:
@@ -425,7 +425,7 @@ def render_markdown(res_data, date_str):
             md += f"  - **内容简述**: {f_item.get('summary', '无摘要')}\n"
 
     md += f"\n\n> ✅ 本次分析 {len(pushed) + len(filtered)} 条原始情报\n"
-    md += f"> 💡 **西电情报 Agent** 驱动中\n"
+    md += f"> 💡 **{get_display_name()}** 驱动中\n"
     return md
 
 def save_and_cleanup(content, date_str):

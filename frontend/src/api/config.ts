@@ -3,7 +3,16 @@
  */
 import client from "./client";
 
+export interface ProfileData {
+  school_name: string;
+  assistant_display_name: string;
+  probe_query: string;
+  report_title: string;
+  identity_prompt: string;
+}
+
 export interface ConfigData {
+  profile: ProfileData;
   llm_api_key: string;
   llm_base_url: string;
   llm_model: string;
@@ -20,6 +29,7 @@ export interface ConfigData {
   run_times: string[];
   failure_alert_threshold: number;
   dashboard_page_size: number;
+  hidden_nav: string[];
   multimodal_enabled: boolean;
   multimodal_api_key: string;
   multimodal_base_url: string;

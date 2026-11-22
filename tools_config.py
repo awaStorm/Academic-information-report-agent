@@ -12,6 +12,9 @@ from src.processors.mergers.final_merger import FinalMerger
 from src.agent.database import AgentMemory
 from src.agent.pusher import Pusher
 from src.agent.analyzer import run_analysis_flow
+from src.utils.card_discovery import (
+    discover_source_cards, list_source_cards, add_card_to_checklist, remove_card,
+)
 
 # --- 第一部分：给 LLM 看的工具描述 (Metadata) ---
 # 严格遵循 OpenAI/DeepSeek 的 Tool Calling 格式
@@ -86,13 +89,13 @@ TOOLS_METADATA = [
         "type": "function",
         "function": {
             "name": "run_wechat_scraper",
-            "description": "抓取微信公众号情报（主数据源：微信读书通道）。若用户提到特定公众号（如'西电物理'），请务必将全名传入 extra_query 参数以执行定向扩充抓取。返回值必须按 error_type 解读，严禁把抓取失败说成'没有新情报'：success=true 且 count>0 = 正常取到文章；success=true 且 count=0 = 通道正常但目标号确实没有文章（只有这一种才是'没有新情报'）；success=false 时，SESSION_EXPIRED/AUTH 表示登录态失效且**工具已自动尝试静默续期仍未成功**，此时才需调用 harvest_weread_session 扫码；RATE_LIMITED 表示限流（告知用户稍后重试即可、无需扫码）；SOURCE_UNAVAILABLE 表示数据源确实不可用（通道超时/HTTP 异常）；NOT_FOUND 表示目标号未被收录或本次检索无结果（属正常情况，不要报成故障）。若返回值含 failed_targets，说明部分公众号本轮失败，需一并如实告知用户。",
+            "description": "抓取微信公众号情报（主数据源：微信读书通道）。若用户提到检查清单之外的特定公众号，请务必将全名传入 extra_query 参数以执行定向扩充抓取。返回值必须按 error_type 解读，严禁把抓取失败说成'没有新情报'：success=true 且 count>0 = 正常取到文章；success=true 且 count=0 = 通道正常但目标号确实没有文章（只有这一种才是'没有新情报'）；success=false 时，SESSION_EXPIRED/AUTH 表示登录态失效且**工具已自动尝试静默续期仍未成功**，此时才需调用 harvest_weread_session 扫码；RATE_LIMITED 表示限流（告知用户稍后重试即可、无需扫码）；SOURCE_UNAVAILABLE 表示数据源确实不可用（通道超时/HTTP 异常）；NOT_FOUND 表示目标号未被收录或本次检索无结果（属正常情况，不要报成故障）。若返回值含 failed_targets，说明部分公众号本轮失败，需一并如实告知用户。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "extra_query": {
                         "type": "string",
-                        "description": "可选参数。如果你想抓取预设列表（如教务处）之外的特定公众号（例如'西电计科'、'西电物理'），请在此处传入公众号全名。"
+                        "description": "可选参数。如果你想抓取检查清单之外的特定公众号，请在此处传入公众号全名。"
                     }
                 },
                 "required": []
@@ -200,6 +203,59 @@ TOOLS_METADATA = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "discover_source_cards",
+            "description": "信源发现工具：根据学生的需求（如关注的学校、专业、想盯的竞赛类型）由 AI 推荐稳定的信源，并生成候选卡片——网站类大卡片（含抓取配置）与微信公众号小卡片。网站卡片会做一次可达性+选择器验证，未通过的标记为「未验证」。生成后不会自动加入检查清单，需要用户确认或在卡片工作台编排。当用户说'帮我找信源''适配XX学校''我想盯XX竞赛'时调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "requirement": {
+                        "type": "string",
+                        "description": "学生的具体需求，如'我是XX大学计算机专业，想关注所有程序设计竞赛和保研通知'"
+                    }
+                },
+                "required": ["requirement"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_source_cards",
+            "description": "列出全部候选信源卡片与当前检查清单（顺序即扫描顺序）。当用户问'有哪些信源''检查清单里有什么'时调用。",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_card_to_checklist",
+            "description": "把一张候选卡片加入检查清单，加入后 Agent 每次扫描会按清单顺序自上而下抓取。微信相关卡片加入后会自动更新公众号检查目标。需要 card_id，可先用 list_source_cards 获取。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "card_id": {"type": "string", "description": "要加入清单的卡片 ID"}
+                },
+                "required": ["card_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_card",
+            "description": "删除一张候选卡片（同时从检查清单与微信容器引用中清理）。当用户说'删除某信源''移除某公众号卡片'时调用。需要 card_id，可先用 list_source_cards 获取。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "card_id": {"type": "string", "description": "要删除的卡片 ID"}
+                },
+                "required": ["card_id"]
+            }
+        }
     }
 ]
 
@@ -219,6 +275,10 @@ TOOL_MAP = {
     "check_intelligence_memory": lambda title, content, platform: _check_and_save(title, content, platform),
     "send_final_report": lambda pushed_items, date_str=None: _push_notification(pushed_items, date_str),
     "analyze_and_push_intelligence": lambda progress_callback=None: run_analysis_flow(progress_callback=progress_callback),
+    "discover_source_cards": lambda requirement: discover_source_cards(requirement),
+    "list_source_cards": lambda: list_source_cards(),
+    "add_card_to_checklist": lambda card_id: add_card_to_checklist(card_id),
+    "remove_card": lambda card_id: remove_card(card_id),
 }
 
 def _align_weread_browser_env(action="diagnose"):

@@ -99,6 +99,8 @@ async def get_calendar(
                     "format": e.get("format", ""),
                     "location": e.get("location", ""),
                     "weight": e.get("weight", 0.0),
+                    "date": e.get("date", ""),
+                    "notes": e.get("notes", ""),
                     "start_time": start_dt.isoformat() if start_dt else None,
                     "end_time": end_dt.isoformat() if end_dt else None,
                 })

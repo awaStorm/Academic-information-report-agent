@@ -10,6 +10,7 @@ class FinalMerger:
     
     CHAOXING_IN = os.path.join(base_dir, "data", "processed", "data_ready_for_ai.json")
     WECHAT_IN = os.path.join(base_dir, "data", "processed", "data_wechat_ready.json")
+    GENERIC_IN = os.path.join(base_dir, "data", "processed", "data_generic_ready.json")
     FINAL_OUT = os.path.join(base_dir, "data", "processed", "full_intelligence_stream.json")
     
     def __init__(self):
@@ -23,6 +24,7 @@ class FinalMerger:
         sources = [
             ("超星线", self.CHAOXING_IN),
             ("微信线", self.WECHAT_IN),
+            ("通用信源线", self.GENERIC_IN),
         ]
         
         for idx, (label, path) in enumerate(sources):

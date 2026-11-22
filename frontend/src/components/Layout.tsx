@@ -2,8 +2,9 @@
  * frontend/src/components/Layout.tsx - 应用布局
  * 侧边栏导航 + 主内容区
  */
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import { configApi } from "../api/config";
 import {
   Settings,
   LayoutDashboard,
@@ -12,6 +13,7 @@ import {
   BotMessageSquare,
   Trophy,
   CalendarDays,
+  Radar,
 } from "lucide-react";
 
 const navItems = [
@@ -20,24 +22,42 @@ const navItems = [
   { to: "/reports", label: "情报报告", icon: FileText },
   { to: "/ctf", label: "CTF 时间表", icon: Trophy },
   { to: "/calendar", label: "事件日历", icon: CalendarDays },
+  { to: "/source-cards", label: "信源雷达", icon: Radar },
   { to: "/agents/xidian/chat", label: "Agent 对话", icon: BotMessageSquare },
   { to: "/config", label: "配置面板", icon: Settings },
 ];
 
 const Layout: React.FC = () => {
+  const [displayName, setDisplayName] = useState("校园情报助手");
+  const [hiddenNav, setHiddenNav] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    configApi.get().then((res) => {
+      if (!res.success) return;
+      if (res.data?.profile?.assistant_display_name) {
+        setDisplayName(res.data.profile.assistant_display_name);
+      }
+      if (Array.isArray(res.data?.hidden_nav)) {
+        setHiddenNav(new Set(res.data.hidden_nav));
+      }
+    }).catch((e) => console.error("加载配置失败", e));
+  }, []);
+
+  const visibleNavItems = navItems.filter((item) => !hiddenNav.has(item.to));
+
   return (
     <div className="flex h-screen bg-dark-bg text-gray-300">
       {/* 侧边栏 */}
       <aside className="w-56 bg-dark-card border-r border-white/5 flex flex-col flex-shrink-0">
         {/* Logo */}
         <div className="p-5 border-b border-white/5">
-          <h1 className="text-base font-bold text-white">西电校园情报助手</h1>
-          <p className="text-xs text-gray-500 mt-1">v2.0 · FastAPI</p>
+          <h1 className="text-base font-bold text-white">{displayName}</h1>
+          <p className="text-xs text-gray-500 mt-1">v2.4 · FastAPI</p>
         </div>
 
         {/* 导航 */}
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

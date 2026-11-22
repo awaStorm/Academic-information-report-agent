@@ -21,11 +21,20 @@ const instance = axios.create({
 instance.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    const message =
-      error.response?.data?.message ||
-      error.response?.data?.detail ||
-      error.message ||
-      "请求失败";
+    const data = error.response?.data;
+    // FastAPI 422 校验错误的 detail 是 [{loc,msg,input},...] 数组，
+    // 直接拼进字符串会变成 [object Object]；这里提取每条 msg 拼成可读文案。
+    let detailMsg = "";
+    if (Array.isArray(data?.detail)) {
+      detailMsg = data.detail
+        .map((d: { msg?: string; loc?: unknown[] }) =>
+          d?.msg ? `${Array.isArray(d.loc) ? d.loc.slice(1).join(".") + ": " : ""}${d.msg}` : "")
+        .filter(Boolean)
+        .join("；");
+    } else if (typeof data?.detail === "string") {
+      detailMsg = data.detail;
+    }
+    const message = data?.message || detailMsg || error.message || "请求失败";
     return Promise.reject(new Error(message));
   }
 );

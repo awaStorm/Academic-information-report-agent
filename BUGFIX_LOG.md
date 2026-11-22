@@ -4,6 +4,249 @@
 
 ---
 
+## [2026-11-21] v2.6.0 Fixed：WebSocket 断线丢消息 + 日历筛选不持久化
+
+### 根因澄清
+用户以为"重置了 cookie"——实际项目根本没有 cookie/auth session。真相：WS 无应用层心跳、无 visibilitychange 处理（切后台半开连接检测不到、重连被节流）、后端 `send_log` 在无连接时直接丢弃日志且不回放、session id 存在 sessionStorage（关/回收标签页即失效）。日历 `hiddenTypes` 只是内存 state，刷新即空。
+
+### Fixed
+1. **后端日志不丢 + 重连回放**（`backend/ws/connection_manager.py`）：按 session 缓存最近 500 条日志（带递增 seq），`send_log` 无论有无连接都先缓存；`connect` 时回放历史（`type=replay`）；新增 `clear_history`（重置终端）；支持 `ping→pong` 心跳。WS 端点（`backend/main.py`）处理 ping/pong/clear_history。修复时曾漏写 `_connection_count` 导致 WS 连接崩溃（1006），已补回。
+2. **前端 WS 可靠性**（`frontend/src/api/websocket.ts`）：session id 改 localStorage（迁移旧 sessionStorage）；20s ping / 8s pong 超时判定半开连接并主动重连；visibilitychange 切前台立即重连/探活；按 seq 去重回放；管理器成为日志唯一数据源（新增 `appendLocal`/`onBufferChange`），组件订阅 buffer 全量刷新，重连回放不重复展示。
+3. **日历筛选持久化**（`CalendarPage.tsx`）：`hiddenTypes` 读写 localStorage `calendar_hidden_types`，刷新/重开保持。
+
+### 验证
+- 后端 TestClient：断线期间推 3 条日志→重连收到 `replay` 含 3 条带 seq 日志；ping→pong 正常。
+- 前端：重启干净后端实例 8140 + 临时前端 7861（未污染正式端口）实测 WS"已连接"、心跳跑过 21s 仍连、visibilitychange 不误断；日历点击隐藏→localStorage=`["ctf"]`→刷新仍 line-through，恢复后清除；session id 在 localStorage、旧 sessionStorage 已迁移清空。`py_compile`/`npm run build` 通过。
+- **注意**：正式端口 8138 由环境 watchdog 守护（CIM 查不到、Stop-Process 无效），运行中的仍是旧代码；本次验证均在新实例完成。用户重启后端（start.bat）后 8138 即加载新 WS 代码。临时实例 8140/8141/7861 已停，临时文件已清。
+
+---
+
+## [2026-11-20] v2.6.0 Added：拖拽吸入动画 + 全局平滑过渡
+
+### Added
+1. **拖入微信容器的"吸入"动画**：`DragOverlay` 默认 drop 是"回弹原位"，加上 API+load 刷新导致卡片"先弹回再突然消失"。改为 `dropAnimation={null}` 关掉回弹，新增 `AbsorbFly` 飞行体：从 `active.rect.current.translated`（放下位置）用 Web Animations API 飞向 `over.rect`（容器中心），340ms 内 `scale 1→0.15` + 位移 + 淡出，动画 onfinish 后才落库刷新，视觉上卡片被"吸进"容器。
+2. **容器悬停反馈**：`DroppableArea` isOver 时加 ring + `scale-[1.015]` + 光晕，并把 `childrenDropped` 传给 `WechatGroupCard` 强化边框高亮。
+3. **全局弹窗入场**：新增 `overlayIn`/`modalIn`/`riseIn` keyframes 与 `.animate-overlay-in`/`.animate-modal-in`/`.animate-rise-in` 复用类（含 `prefers-reduced-motion` 降级），应用到 DegradeNotice/EventDetailModal/NewCardModal/ConfigEditor 四个弹窗；信源仓库候选卡 stagger 浮现。
+4. **Toast 退场**：4s 后先标记 leaving 播 `toastOut` 淡出，300ms 后再移除，避免瞬间消失。
+
+### 验证（Web 实测，用户数据未污染）
+- 拖"西电双创"入容器：MutationObserver 捕获到飞行体（文字"西电双创"、duration=340ms、keyframes 含 translate+scale），落库后容器 7→8、仓库隐藏；测完移出恢复 7/11。
+- 弹窗：手动新建弹窗实测 `animationName` 为 `modalIn`/`overlayIn`，入场动画生效。截图 `reports/absorb_modal.png`。
+- `npm run build` 通过。
+
+---
+
+## [2026-11-20] v2.6.0 Changed：清理冗余的浏览器原生 tooltip（title 属性）
+
+按用户要求：已有可见文字说明的元素不再挂 `title`（悬停灰气泡是浏览器原生提示），保留必要的。删除 10 处：卡片"点击查看XX详情"（仪表盘/日历 CTF/日历情报/CTF 页）、日历图例两项、日历时间轴节点/跳转 chip、CandidateCard"加入清单"按钮、ConfigPage 栏目按钮。保留 13 处：纯图标按钮（置顶/删除容器/展开/撤下仓库/启停）、纯色状态灯、URL 链接（显示文字非真实 URL）。`alert/confirm/prompt` 仍为 0 处。`npm run build` 通过。
+
+---
+
+## [2026-11-20] v2.6.0 Added：事件卡片详情弹窗 + 侧边栏栏目撤下 + 日历图例筛选
+
+### Added
+1. **事件卡片可点开看详情**：新增公共组件 `EventDetailModal.tsx`（含 `eventToFields`/`eventToParagraphs` 归一化工具），日历（CTF+情报）、仪表盘（推送记录）、CTF 时间表（赛事卡）三处卡片点击即弹出完整字段（标题/日期/来源/分类/状态/时间轴/链接/正文摘要等），卡片内链接与按钮 `stopPropagation` 避免误触。此前卡片仅 `line-clamp-2` 截断、点了无反应。
+2. **后端 CTF 日历补字段**：`calendar_api.py` 的 CTF 事件新增 `date`/`notes` 返回，供详情展示。
+3. **侧边栏栏目撤下（按钮制）**：config 新增 `web_ui.hidden_nav`（`ConfigUpdate.hidden_nav` + GET 返回 + POST 保存，顺便修复 `dashboard_page_size` 保存覆盖整个 web_ui 的隐患）；`Layout` 加载配置过滤 navItems；`ConfigPage` 加按钮制显隐区，撤下后侧边栏隐藏但路由仍可访问。**配置面板入口禁止隐藏**，避免被锁在门外。
+4. **日历图例筛选**：图例 span 改 button，hover 变红+轻微缩放（`hover:text-red-400 hover:scale-105`），点击加删除线并隐藏该类型在日历的打点与右侧详情卡片（`hiddenTypes` state），两类都隐藏时给提示。
+
+### 验证（Web 实测）
+- 仪表盘卡片点击弹出详情（来源/分类/状态/事件日期/推送时间/完整摘要）；日历 CTF 卡片弹出（状态/CTFtime/官网/赛制/地点/权重/日期/开始/结束）；截图 `reports/event_detail.png`、`reports/ctf_detail.png`。
+- 图例：点击 CTF 项文字加 `line-through`、青色打点 20→0，再点恢复；hover 样式类确认存在。
+- 侧边栏：撤下 CTF 项保存后 `hidden_nav=['/ctf']`，刷新侧边栏 8→7 项、直接访问 `/ctf` 仍正常，恢复后 8 项齐全；截图 `reports/nav_config.png`。
+- `py_compile`/`npm run build` 通过（曾报 2 个未使用类型导入，已修）。
+
+---
+
+## [2026-11-20] v2.5.0 Changed：公众号管理整合进信源雷达（配置面板改只读镜像 + 历史目标迁移）
+
+### Changed
+1. **配置面板公众号管理改为只读镜像**：移除本地添加/删除输入框与按钮（消除双写冲突），只读展示当前微信检查目标，并加「去信源雷达管理」跳转按钮。说明文案指明增删走信源雷达的「手动新建公众号卡片」或 AI 生成后加入清单/容器。
+2. **切断配置面板对 targets 的写权限**：`ConfigPage.handleSave` 提交时剔除 `wechat_targets`；`config_api.update_config` 忽略外部传入的 `wechat_targets`，只由 `source_store.sync_wechat_targets()` 统一写回，避免保存其它配置时覆盖雷达目标。抓取参数（fetch_count/delay_range）照常可改。
+3. **历史 targets 迁移**：新增 `source_store.migrate_targets_to_cards()`，应用启动时把 targets 里没有对应公众号卡片的孤儿名字补建为公众号卡片放仓库（幂等，不自动加清单/容器），`backend/main.py` lifespan 调用。保留「手动填公众号名称」能力——`NewCardModal` 的公众号类型已有独立的「公众号名称（检查目标）」字段。
+
+### 验证（Web 实测，用户数据未污染）
+- 配置面板公众号区显示只读说明 + 跳转按钮，点击正确导航 `/source-cards`。
+- 信源雷达手动新建公众号卡片（卡名「测试公众号整合验证」、检查目标独立填「测试公众号检查目标」）成功；未加清单时 targets 为空，加入清单后 targets 自动写回该目标，撤下+删除后 targets 归空、卡片恢复 6 张。
+- 迁移函数实测幂等（当前 targets 为空，0 新增）；`py_compile`/`npm run build` 通过；截图 `reports/config_readonly.png`。
+
+---
+
+## [2026-11-20] v2.5.0 Changed：删除微信容器移除 confirm 弹窗
+
+按用户要求不再使用任何 `window.alert/confirm/prompt`：删除微信容器直接执行，不弹二次确认、也不弹成功 toast（失败仍用 toast 报错）。全前端搜索确认 0 处 alert 类调用，`npm run build` 通过。
+
+---
+
+## [2026-11-19] v2.5.0 Fixed：信源卡片交互体验——清单展开详情、容器可删除、拖拽命中收紧、入容器卡片归位
+
+### Added / Fixed
+1. **检查清单行展开/收起详情**：`ChecklistRow` 加展开按钮，展示类型（网站/超星内核/微信内核/公众号）、备注、URL（可点开）、列表选择器、title/link/date 字段选择器、公众号名、验证状态；不再只显示一行名字。
+2. **微信容器可删除**：`WechatGroupCard` 加删除按钮 + 二次确认；删除容器只删容器壳，里面的公众号卡片不删除、自动返回仓库，并同步 `wechat.targets`（后端 `remove_card` 已支持，缺的是 UI 入口）。
+3. **修复拖拽误命中容器**：`DndContext` 碰撞检测从 `closestCenter`（按中心最近，"仅 y 轴重合"就命中）改为只用 `pointerWithin`——指针必须真实进入容器/清单行矩形才会合并/排序，不再有"中心最近"兜底。
+4. **入容器公众号从仓库归位**：`candidates` 过滤新增"排除已进入任意微信容器 children 的公众号"，拖进容器后卡片在仓库消失；从容器移出或删除容器后 child 引用消失，卡片自动回到仓库。
+
+### 验证（Web 实测，用户数据未污染）
+- 仓库初始 0（3 个公众号均已在容器），容器正确显示 2/1/0 个公众号；清单展开显示"超星内核/备注/状态"，收起正常。
+- 删除临时容器：confirm 文案正确，删除后仅临时容器消失、原有 3 个容器完好。
+- 移出容器：西电青年从容器移出后出现在仓库（0→1），容器 children 同步更新。
+- 拖拽命中：拖到容器外（y 重合但 x 在矩形外）不合并（g 保持 2/0）；真正拖进容器内部才合并（g2=1、仓库隐藏）。首次用 closestCenter+兜底时 "y 轴重合"仍误合并，改为纯 pointerWithin 后修复。
+- 测试数据全部恢复测试前基线（8 卡/3 容器、children 分布一致）；截图 `reports/expanded_row.png`、`reports/containers_final.png`；`npm run build` 通过。
+
+---
+
+## [2026-11-19] v2.5.0 Changed：相关性判定从脚本词表改为 LLM 语义裁判，新增「再来一轮」闭环
+
+### Changed（按用户要求放大 LLM 作用，不再用死脚本拦截语义）
+1. **删除脚本相关性判定**：移除 `card_discovery.py` 的 `GENERIC_SITE_MARKERS` 泛站词表与 `_relevance()` 关键词子串匹配（此前把「创新挑战赛/报名时间」等通用词当专属命中，泛站蒙混过关、语义相关却被误杀）。
+2. **新增 LLM 裁判 `_judge` + `JUDGE_PROMPT`**：语义判断交给 LLM，输入原始需求+用户补充+本轮卡片，输出 `{pass, reason, feedback}`；脚本只做 JSON 解析与兜底。约束（禁泛站、要主题专属）仍写在 RECOMMEND/REFOCUS prompt 里，由 LLM 评判产出。
+3. **feedback 回灌**：首轮不达标时把 LLM 的具体改进意见注入 `REFOCUS_PROMPT` 第二轮，不再写死「过于泛化」的预设原因；降级说明也带上评审意见。
+4. **「再来一轮」闭环**：`discover` 接口支持 `followup`（用户补充需求）与 `feedback`（上一轮评审意见）；前端新增 `ReviewBar.tsx` 展示达标徽标 + LLM 理由 + 改进方向，并提供输入框「补充说明再来一轮」，把两者一起交回 Agent 重生成。
+
+### 验证
+- 真实 API（取证比赛需求）两轮：第 1 轮 LLM 判不达标并给出 242 字具体意见（指出「美亚柏科官网样例是职称评审公示、与赛事无关，抓取没定位赛事栏目」「数证杯无专门信源」「CTFtime/FreeBuf 是综合平台」），回灌第 2 轮后只留 4 张专属信源并判达标——语义质量远超原脚本词表。后端返回新增 `verdict` 字段。
+- 前端 Web 回放验证：达标/未达标徽标、LLM 理由、改进方向渲染正确；「再来一轮」请求体实测带上 `followup` 与 242 字 `feedback`，闭环成立。截图 `reports/review_bar.png`。
+- `py_compile` / `npm run build` 通过。
+
+---
+
+## [2026-11-19] v2.4.0 Added：信源生成两轮质量门 + 降级说明对话框；清单移除改为「撤下到仓库」
+
+### Added / Changed
+1. **两轮相关性质量门**（`src/utils/card_discovery.py`）：`RECOMMEND_PROMPT` 输出 `topic_keywords`；`_relevance()` 判定生成卡片是否真正命中主题、且不是学校官网/教务处等泛站凑数。首轮不达标则清掉首轮卡片，用 `REFOCUS_PROMPT` 聚焦重生成（最多两轮）。
+2. **降级说明对话框**：两轮仍不达标时 `DEGRADE_PROMPT` 让 LLM 如实说明「确凿没有多来源专门监测站」的原因，并给最接近的官方/权威兜底信源；返回 `degraded` / `degrade_note` / `rounds` / `keywords`。前端新增 `DegradeNotice.tsx`（仅供说明、无需填写），展示原因、关键词、两轮过程，按钮「知道了」。
+3. **撤下到仓库**：检查清单的移除按钮语义改为「撤下到仓库」（候选卡片栏即仓库），卡片保留、可再次加入清单；系统卡仍不可移除。
+
+### 验证（含验证方式说明）
+- 后端降级分支为**真实 API 调用**：冷门主题 `ZQX-7734-X` 返回 `degraded=true` + LLM 说明 + 兜底卡片。
+- 前端对话框为**网络回放验证**：真实 LLM 对同一主题并非每次都降级（temperature=0.2 仍有波动），故用已捕获的真实降级响应经 `network route`（带 `--allow-origin` 解决 7860→8138 跨域）回放，只验证前端对 `degraded=true` 的处理与弹窗渲染，不重复消耗 LLM、不污染仓库。实测标题、原因、关键词、生成轮次、「知道了」按钮齐全且可关闭，截图 `reports/degrade_notice.png`。此方式未重复验证后端再次生成，后端已由真实 API 单独验证。
+- 测试数据已清理：卡片恢复 15 张（含 2 张系统卡）、清单 4 项；`v3_*.yaml` 等临时快照已删除。
+
+---
+
+## [2026-11-18] v2.4.0 Fixed：Agent 工具调用路径 GBK 编码崩溃（采集器 emoji print）
+
+用 Web 对话执行完整流程时，`run_chaoxing_scraper` / `run_wechat_scraper` 在 Agent 线程池调用中报 `'gbk' codec can't encode character '\U0001f680'/\U0001f514'`，两个采集工具双双失败。根因：后台 uvicorn 未走 `start.bat` 的 `chcp 65001`，控制台默认 GBK，采集器/分析器里大量 emoji `print` 在线程中抛错。修复：`backend/main.py` 入口处一次性 `sys.stdout/stderr.reconfigure(encoding="utf-8", errors="replace")`，覆盖所有模块的 print（全局生效）。实测修复后两个采集工具均"✅ 工具完成"，超星真实抓到 20 条。
+
+---
+
+## [2026-11-18] v2.4.0 Fixed：默认信源卡片缺失 + Web 全流程漏接通用抓取 + 系统卡启用状态假开关
+
+### Fixed（重要：修复前用户启动 agent 会抓不到任何消息）
+1. **测试清空了用户默认信源**：此前每轮 Web 测试后用 `DELETE FROM source_cards/checklist` + 重置 targets 恢复"干净状态"，误把用户应有的默认信源一起清掉（`configs/settings.yaml` 未被 git 追踪，无法从历史恢复）。修复：应用启动 `lifespan` 里调 `source_store.ensure_system_cards()`，**自动创建「超星通知（系统内置）」「微信公众号（系统内置）」两张卡并置于检查清单最前**（超星→微信），已存在则只重排补回，幂等。用户选「从0自己加公众号」，故 targets 留空待用户添加。
+2. **Web Agent 的 `_run_full_flow` 漏调 `run_generic_scraper`**：上一轮虚报"已接入 full_flow"，实际只接到了 scheduler/CLI，Web 对话执行完整流程时清单里的网站卡片根本不会被扫描。修复：`_run_full_flow` 与 `_run_scrape` 均在采集阶段补上通用抓取（按清单顺序），并如实上报日志。
+3. **系统卡的启用/停用是假开关**：原来清单 checkbox 能切换但超星/微信内核照跑不误。修复：两个流程均从 `list_checklist()` 读取系统卡 enabled，停用则跳过对应采集内核并记日志，启用状态真实生效。
+
+### Added
+- 卡片类型新增 `chaoxing`/`wechat_system`（`SYSTEM_CARD_TYPES`）：`verified=true`、**不可删除、不可移出清单**（`remove_card`/`remove_from_checklist` 拒绝，API 明确报错），前端标"系统内置"并隐藏移除按钮、用独立图标；手动新建弹窗不提供这两种类型。
+- `source_store.ensure_system_cards()`：幂等初始化 + 顺序保证（超星→微信→其余）。
+
+### 验证
+- 重启后端后实测：自动创建 2 张系统卡、清单顺序 0=超星 1=微信、删除/移出均被拒绝；Web 页面显示"系统内置"标签且无移除按钮；添加公众号卡片→加入清单→`wechat.targets` 写回成功（实测 `['美亚柏科']`），删除后 targets 归空。`py_compile`/`npm run build` 通过。
+
+---
+
+## [2026-11-18] v2.4.0 Added：卡片人工校验闭环 + 可编辑 + 手动新建
+
+### Added（三项新能力，均 Web 实测通过）
+1. **样例人工验证 + 候选重选**：发现阶段把系统提取的 DOM 候选（选择器/条数/样例标题）随配置存入 `config._candidates`。卡片编辑器展示全部候选（如「发现时检测到 8 个候选结构」），点任一候选即调 `POST /{id}/reselect-candidate` 重建配置并真实抓取验证；测试抓取后展示样例列表，**必须勾选「样例确认无误」才能保存**（未勾选时保存按钮禁用）。实测：点候选 1 后 reselct 返回 200、命中 4 条、样例从"论坛新闻"变为"获奖公告/申诉处理结果"，勾选后方可保存。
+2. **卡片可编辑**：`POST /{id}/edit` 支持改名字/备注/公众号名/启用状态；网站改 URL 会自动标记 `verified=false` 强制重测。编辑器对公众号显示「公众号名称（检查目标）」独立字段（与卡片显示名分离）。实测改名「测试取证公众号」→「取证赛事观察」成功，公众号名不受影响。
+3. **手动新建卡片**：工作台顶部「手动新建」按钮，弹窗支持网站/公众号/微信容器三种类型，按已有卡片格式创建；网站卡片需测试抓取通过才能创建（实测创建公众号卡片 200）。
+- 前端新增 `NewCardModal.tsx`，`ConfigEditor.tsx` 重写支持上述能力；`sourceCards.ts` 加 `reselect`/`edit` API 与 `DomCandidate` 类型。
+- 后端 `discover_source_cards` 保存候选到 config；`update-config` 保留候选供反复重选。
+
+### Fixed
+- `sourceCards.ts` 的 `DomCandidate` 接口曾误嵌在 `SourceCard` 内导致 TS 语法错误 → 移到前面独立声明；`sourceCardsApi.add` 补 `verified` 字段类型。
+
+### 验证
+- `py_compile` / `npm run build` 通过；Web 实测三项功能全通、Console 0 errors；测试数据已清理。
+
+---
+
+## [2026-11-18] v2.4.0 修复：中文站点未声明 charset 导致抓取标题乱码
+
+用原话「我现在希望获得取证比赛、ai创作比赛类相关的情报来源，让agent帮我挑选并创建情报卡」做 Web 实测时，AI 生成的「中国大学生计算机设计大赛」卡片验证 note 出现 `2026å¹´ä¸­...` 乱码。根因：该站点 HTTP 响应头无 charset，`requests` 默认按 ISO-8859-1 解码。修复：`generic_scraper._http_get` 在响应头未声明 charset 时用 `resp.apparent_encoding` 按内容探测修正编码。实测重抓该站点标题恢复为正常中文（`2026年中国大学生计算机设计大赛顶层设计高峰论坛...`）。同批生成 4 张网站卡片 + 6 张公众号卡片，另 2 个 JS 渲染站点如实跳过。
+
+---
+
+## [2026-11-18] v2.4.0 重构信源卡片生成流程：选择器不再由 LLM 凭空写，改为基于真实 DOM 提取并实际抓取验证
+
+### Changed（流程重构，非补丁）
+用户指出原流程缺陷：LLM 被要求在没看过目标网页的情况下写出 CSS 选择器，结果只能留空，网站大卡片全是抓不到数据的空壳。本次把生成流程彻底改造：
+
+1. **阶段 1**：LLM 只按需求推荐站点名 + URL + 推荐理由，明确不写选择器（`RECOMMEND_PROMPT`）。
+2. **阶段 2**：系统用 `requests` 抓真实 HTML，新增 `src/utils/dom_analyzer.py` 扫描页面里所有"含多个相似子元素且带链接/日期"的列表结构，为每个候选生成**来自真实 DOM 的**列表项选择器与 title/link/date 字段选择器及样本文本。
+3. **阶段 3**：LLM 只看候选样本做语义判断，返回选中 index（`SELECT_PROMPT`），不写选择器；选不出时用评分最高候选兜底并照样验证。
+4. **阶段 4**：用生成配置**真实抓一次**验证，失败把原因反馈给 LLM 重试（最多 3 轮）；通过的才落库为 `verified=true`，note 记录"抓到 N 条 + 样例标题"。
+5. **阶段 5**：`add_card_to_checklist` 拒绝未验证的网站卡片；UI 对未验证卡片显示警告并禁用"加入清单"，提供"编辑配置"入口。
+
+### Added
+- `src/utils/dom_analyzer.py`：DOM 候选提取（稳定 CSS 选择器生成、字段推断、质量评分、列表项选择器），已用本地 HTML 与真实站点（研招网）实测命中。
+- `POST /api/v1/source-cards/test-config`：测试任意抓取配置、返回命中数与样例，不落库。
+- `POST /api/v1/source-cards/{id}/update-config`：手动编辑配置后先真实验证、通过才写库并标记 verified（覆盖 JS 渲染等自动失败场景）。
+- 前端 `ConfigEditor.tsx`：网站卡片编辑配置弹窗（URL/列表选择器/字段选择器 + 测试抓取 + 样例预览 + 验证通过才可保存）。
+
+### Fixed
+- `SELECT_PROMPT` 用 `str.format()` 时，JSON 示例里的 `{"choice":...}` 被当占位符导致 `KeyError` → 改用 `__CANDIDATES__` 占位符 + `.replace()`。
+- 原 `dom_analyzer` 生成的是外层容器选择器（1 个节点）而非列表项选择器，导致只解析出 1 条 → 改为生成能命中每一项的 `容器 > 子元素` 选择器，实测解析出全部条目。
+- 提示词/文案里"网站卡片生成时做验证，未验证仍可加入清单"与新逻辑矛盾 → 修正为"验证通过才可加入，失败可手动修复"。
+
+### 验证（Web 全流程实测）
+- 本地模拟通知站：添加未验证卡片 → UI 警告且按钮禁用 → 编辑配置 → 测试抓取命中 4 条 → 保存后 verified → 加入清单 → 实际扫描抓到 4 条 → 合入 `full_intelligence_stream`。
+- 真实站点：AI 生成流程对研招网抓到 10 条真实数据并标记 verified（note 含样例标题）；对 JS 渲染站点（CCF/CCPC/蓝桥杯官网）如实跳过、不再产生空壳卡片；公众号卡片正常生成。
+- 研招网卡片经 Web 加入清单后，通用扫描共抓到 14 条真实数据。
+- `py_compile` / `npm run build` 通过；浏览器 Console 0 errors；测试数据已全部清理。
+
+---
+
+## [2026-11-18] v2.4.0 Web 实测修复：容器 422 / 生成误报超时 / 公众号注册 0 个 / 清单排序失效
+
+> 在浏览器里真实操作 `/source-cards` 全流程（生成→拖拽合并→注册→加入清单→排序→启停）发现并修复以下 5 个 bug，均已回归实测通过。
+
+### Fixed
+1. **新建微信容器报 422 + toast 显示 `[object Object]`**：后端 `create_wechat_group` 复用 `AddCardRequest`（`type` 必填），而前端只传 `name`，FastAPI 返回 422；其 `detail` 是数组，前端 `client.ts` 直接拼进字符串变成 `[object Object]`。修复：后端新增 `CreateGroupRequest`（name 带默认值、无 type 必填）；`client.ts` 拦截器识别数组型 `detail` 并提取 `msg` 拼成可读文案（含字段路径）。实测 create 返回 200、toast 正常。
+2. **AI 生成卡片前端误报超时**：`discover` 需 LLM 推理 + 逐站可达性验证（含重试退避），常超 30s；前端 axios 默认 30s 超时后报「生成失败: timeout of 30000ms exceeded」，而后端实际已成功写库（实测生成 11 张卡片）。用户若重试会重复堆积。修复：`sourceCardsApi.discover` 单独设 `timeout: 300000`（5 分钟），页面已有生成中 loading 态。实测生成返回 200、候选库正确刷新。
+3. **注册公众号检查显示 0 个**：`sync_wechat_targets()` 只收集检查清单里的卡片，用户把公众号小卡片拖进微信容器后并未把容器加入清单，导致注册目标为空、微信采集链不知道要监控。修复：改为同时收集**所有启用容器内的公众号**（拖入合并即视为注册意图），清单内独立公众号仍受启用状态约束；停用容器则跳过。实测 targets 正确写入 3 个（含容器内公众号）。
+4. **检查清单拖拽排序不生效**：`DndContext` 默认 `rectIntersection` 碰撞检测下，外层清单 droppable 抢占了行级 droppable，`checklist/reorder` 从未触发。修复：改用 `closestCenter` 碰撞检测，让最近的清单行胜出。实测拖拽后顺序从「蓝桥杯/中国高校/保研人」变为「蓝桥杯/保研人/中国高校」，reorder 返回 200。
+5. **侧栏版本号过时**：`Layout.tsx` 副标题写死 `v2.0 · FastAPI`，更新为 `v2.4 · FastAPI`。
+
+### 验证
+- 全部改动经 `py_compile` + `tsc --noEmit` 通过；重启后端后在浏览器逐项回归：create 200、discover 200 且卡片刷新、register 返回 3 个 targets、reorder 200 且顺序变化、新容器 toast 正常。
+- 实测产生的 18 张测试卡片 / 3 条清单 / targets 已清理，恢复干净初始状态。
+
+---
+
+## [2026-11-18] v2.4.0：AI 生成信源卡片 + 检查清单顺序扫描 + 去西电化（面向任意学校）
+
+### Added（新功能：信源雷达）
+- **信源卡片工作台**（`/source-cards`）：候选卡片库、微信容器编排、检查清单三栏布局，支持拖拽。
+  - 学生填写需求（学校/专业/关注竞赛）→ AI 生成候选卡片：**网站大卡片**（含 URL/CSS 选择器/字段映射，生成时做可达性+选择器命中验证）与**公众号小卡片**。
+  - 多个公众号小卡片可拖入微信容器合并为一组，统一注册进公众号检查目标。
+  - 卡片可拖入检查清单，清单顺序即 Agent 每次扫描的自上而下顺序，支持拖拽重排与启用/停用。
+- **双入口共享存储**：Agent 对话（4 个新工具 `discover_source_cards` / `list_source_cards` / `add_card_to_checklist` / `remove_card`）与页面按钮共用 `src/utils/card_discovery.py` 服务函数，落 SQLite（`data/memory.db` 的 `source_cards` + `checklist` 两表）。
+- **通用配置化抓取器** `src/collectors/scrapers/generic_scraper.py`：按清单顺序抓取 website 卡片，单卡片独立超时+指数退避重试，输出对齐 `ContentExtractor` 精炼格式，经 `FinalMerger` 合入统一时间轴。清单为空时静默跳过，零回归。
+- **REST API** `/api/v1/source-cards/*`：卡片 CRUD、清单增删排序、微信容器合并、公众号注册；前端新增 `@dnd-kit/core` + `@dnd-kit/sortable` 依赖，`Toast` 轻提示公共组件。
+
+### Changed（去西电化）
+- 新增 `profile` 配置段（`school_name` / `assistant_display_name` / `probe_query` / `report_title` / `identity_prompt`），全部身份/展示/提示词硬编码点改为读取配置：两处 Agent system_prompt、分析提示词、简报标题/页脚、推送标题、FastAPI title/health name、CLI 横幅、前端侧栏标题、微信读书探活词、工具描述举例。
+- **默认公众号清空**：`collectors.wechat.targets` 默认 `[]`，新增存量配置迁移——仅当旧列表精确匹配 5 个历史默认西电号时清空落盘，不误伤用户自定义列表。
+- Agent 类名与路由名 `xidian` 保留为兼容别名（避免破坏 `/agents/xidian/chat` 书签），仅展示名配置化。
+
+### Fixed（关联逻辑断层）
+- `config_api.update_config`：只改抓取参数而没传 `wechat_targets` 时会把公众号清单静默清空——改为仅在显式传入时覆盖；targets 现由信源卡片统一管理。
+- `source_store.remove_card`：删除公众号卡片时同步清理所有微信容器 `children` 中的残留 id，避免脏引用。
+- 定时任务 `_run_task`：通用抓取后补 `FinalMerger` 合流步骤，否则抓取结果写进 `data_generic_ready.json` 却进不了 `full_intelligence_stream.json`，分析层读不到。
+
+### 验证
+- `py_compile` 全部改动/新增 Python 文件通过；工具元数据与 `TOOL_MAP` 17↔17 完全一致。
+- `npx tsc --noEmit` 与 `npm run build` 通过（dnd-kit 正常打包）。
+- FastAPI `TestClient` 实测 `GET /api/v1/source-cards/` 返回 200、POST 分支正常。
+- 通用抓取器用本地临时 HTTP 服务端到端实测：验证命中、抓取 2 条、日期降序、相对链接补全、`platform=generic:<id>` 均正确。
+- 卡片 CRUD / 清单重排 / 公众号写回 targets / 删除清理容器引用均用临时库实测通过。
+- Python 侧无新增依赖（`requests`/`bs4` 已在 requirements.txt）；前端新增 2 个 dnd-kit 依赖已写入 package.json + lock。
+
+---
+
 ## [2026-10-06] v2.3.4：Agent 对话不再裸 500（httpx 走了系统代理）+ 微信读书扫码崩溃真因（浏览器与档案版本错配）
 
 > 背景：用户两次报障——① Agent 对话返回 `HTTP 500`，日志为 `httpx.ConnectError: [SSL: UNEXPECTED_EOF_WHILE_READING]`；② 微信扫码登录弹不出窗口，报 `BrowserType.launch_persistent_context: Target page, context or browser has been closed`。扫码问题此前曾被归因为「档案目录被残留进程锁定」，并据此给出「关闭所有 Chrome 窗口」的无效指引；本轮定位到真因并纠正该结论。

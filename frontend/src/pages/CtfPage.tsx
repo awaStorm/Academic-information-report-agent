@@ -16,6 +16,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { ctfApi, type CtfEvent, type SortOption } from "../api/ctf";
+import EventDetailModal, { DetailField, eventToFields, eventToParagraphs } from "../components/common/EventDetailModal";
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -161,6 +162,7 @@ const CtfPage: React.FC = () => {
 
   // ---- 大头钉 ----
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
+  const [detail, setDetail] = useState<{ title: string; badge: string; fields: DetailField[]; paragraphs: Array<{ label?: string; text: string }> } | null>(null);
   const [pinLoading, setPinLoading] = useState<Set<string>>(new Set());
 
   // ---- 自动刷新标记：loadEvents 发现后端 refreshing 时置位，由 effect 启动轮询 ----
@@ -481,7 +483,13 @@ const CtfPage: React.FC = () => {
             return (
               <div
                 key={event.id}
-                className={`card !p-3.5 hover:border-accent-primary/20 transition-colors group ${
+                onClick={() => setDetail({
+                  title: event.name,
+                  badge: cfg.label,
+                  fields: eventToFields(event as unknown as Record<string, unknown>),
+                  paragraphs: eventToParagraphs(event as unknown as Record<string, unknown>),
+                })}
+                className={`card !p-3.5 hover:border-accent-primary/20 transition-colors group cursor-pointer ${
                   isPinned ? "!border-amber-500/25 ring-1 ring-amber-500/10" : ""
                 }`}
               >
@@ -493,7 +501,7 @@ const CtfPage: React.FC = () => {
                         ? "text-amber-400 hover:text-amber-300"
                         : "text-gray-700 hover:text-amber-400 opacity-0 group-hover:opacity-100"
                     }`}
-                    onClick={() => handleTogglePin(event.id)}
+                    onClick={(ev) => { ev.stopPropagation(); handleTogglePin(event.id); }}
                     disabled={isPinBusy}
                     title={isPinned ? "取消关注" : "关注（置顶）"}
                   >
@@ -515,6 +523,7 @@ const CtfPage: React.FC = () => {
                           href={url}
                           target="_blank"
                           rel="noopener noreferrer"
+                          onClick={(ev) => ev.stopPropagation()}
                           className="text-sm font-semibold text-white hover:text-accent-light transition-colors truncate flex items-center gap-1"
                           title={url}
                         >
@@ -594,6 +603,10 @@ const CtfPage: React.FC = () => {
           <span>·</span>
           <span>共 {events.length} 个赛事</span>
         </div>
+      )}
+      {detail && (
+        <EventDetailModal title={detail.title} badge={detail.badge}
+          fields={detail.fields} paragraphs={detail.paragraphs} onClose={() => setDetail(null)} />
       )}
     </div>
   );

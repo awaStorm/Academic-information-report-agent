@@ -19,7 +19,17 @@ from src.utils.config_loader import CONFIG
 router = APIRouter()
 
 
+class ProfileUpdate(BaseModel):
+    """身份与展示配置（面向任意学校，不再绑定特定院校）"""
+    school_name: Optional[str] = None
+    assistant_display_name: Optional[str] = None
+    probe_query: Optional[str] = None
+    report_title: Optional[str] = None
+    identity_prompt: Optional[str] = None
+
+
 class ConfigUpdate(BaseModel):
+    profile: Optional[ProfileUpdate] = None
     llm_api_key: Optional[str] = None
     llm_base_url: Optional[str] = None
     llm_model: Optional[str] = None
@@ -37,6 +47,7 @@ class ConfigUpdate(BaseModel):
     run_times: Optional[List[str]] = None
     failure_alert_threshold: Optional[int] = None
     dashboard_page_size: Optional[int] = None
+    hidden_nav: Optional[List[str]] = None  # 侧边栏隐藏的栏目 to 路径列表
     # 多模态识图
     multimodal_enabled: Optional[bool] = None
     multimodal_api_key: Optional[str] = None
@@ -86,6 +97,7 @@ async def get_config():
         return "***" if val else ""
 
     return {"success": True, "data": {
+        "profile": dict(CONFIG.get("profile", {})),
         "llm_api_key": _mask(os.getenv("LLM_API_KEY")),
         "llm_base_url": os.getenv("LLM_BASE_URL", ""),
         "llm_model": os.getenv("LLM_MODEL", CONFIG.get("analysis", {}).get("model_name", "")),
@@ -102,6 +114,7 @@ async def get_config():
         "run_times": CONFIG.get("scheduler", {}).get("run_times", ["08:00"]),
         "failure_alert_threshold": CONFIG.get("scheduler", {}).get("failure_alert_threshold", 3),
         "dashboard_page_size": CONFIG.get("web_ui", {}).get("dashboard_page_size", 20),
+        "hidden_nav": [p for p in CONFIG.get("web_ui", {}).get("hidden_nav", []) if p != "/config"],
         # 多模态识图配置
         "multimodal_enabled": CONFIG.get("analysis", {}).get("multimodal", {}).get("enabled", False),
         "multimodal_api_key": _mask(CONFIG.get("analysis", {}).get("multimodal", {}).get("api_key", "")),
@@ -134,6 +147,11 @@ async def update_config(config: ConfigUpdate):
 
     # 保存 YAML 配置
     yaml_settings = {}
+    if "profile" in data:
+        profile_in = data.get("profile") or {}
+        yaml_settings["profile"] = {
+            k: v for k, v in profile_in.items() if v is not None
+        }
     if any(k in data for k in ("temperature", "max_tokens", "llm_model")):
         yaml_settings["analysis"] = {
             "model_name": data.get("llm_model", CONFIG.get("analysis", {}).get("model_name", "")),
@@ -157,13 +175,18 @@ async def update_config(config: ConfigUpdate):
         analysis["multimodal"] = mm_cfg
         yaml_settings["analysis"] = analysis
     if any(k in data for k in ("fetch_count", "delay_min", "delay_max", "wechat_targets")):
-        yaml_settings["collectors"] = {
-            "wechat": {
-                "fetch_count": data.get("fetch_count", 5),
-                "delay_range": [data.get("delay_min", 5), data.get("delay_max", 8)],
-                "targets": data.get("wechat_targets", []),
-            }
+        cur_wechat = CONFIG.get("collectors", {}).get("wechat", {})
+        wechat_cfg = {
+            "fetch_count": data.get("fetch_count", cur_wechat.get("fetch_count", 5)),
+            "delay_range": [
+                data.get("delay_min", cur_wechat.get("delay_range", [8, 12])[0]),
+                data.get("delay_max", cur_wechat.get("delay_range", [8, 12])[1]),
+            ],
         }
+        # targets 只由信源雷达（source_store.sync_wechat_targets）统一管理，配置面板只读展示。
+        # 忽略外部传入的 wechat_targets，避免配置面板保存时覆盖雷达写回的公众号目标。
+        # 抓取参数（fetch_count/delay_range）仍照常保存。
+        yaml_settings["collectors"] = {"wechat": wechat_cfg}
     if any(k in data for k in ("enable_wecom", "enable_console_report")):
         yaml_settings["pusher"] = {
             "enable_wecom": data.get("enable_wecom", True),
@@ -175,8 +198,19 @@ async def update_config(config: ConfigUpdate):
             "run_times": data.get("run_times", ["08:00"]),
             "failure_alert_threshold": data.get("failure_alert_threshold", 3),
         }
-    if "dashboard_page_size" in data:
-        yaml_settings["web_ui"] = {"dashboard_page_size": data["dashboard_page_size"]}
+    if "dashboard_page_size" in data or "hidden_nav" in data:
+        cur_web = CONFIG.get("web_ui", {})
+        web_cfg = {}
+        if "dashboard_page_size" in data:
+            web_cfg["dashboard_page_size"] = data["dashboard_page_size"]
+        else:
+            web_cfg["dashboard_page_size"] = cur_web.get("dashboard_page_size", 20)
+        if "hidden_nav" in data:
+            # 配置面板入口不可隐藏，避免用户把自己锁在门外
+            web_cfg["hidden_nav"] = [p for p in (data.get("hidden_nav") or []) if p != "/config"]
+        else:
+            web_cfg["hidden_nav"] = cur_web.get("hidden_nav", [])
+        yaml_settings["web_ui"] = web_cfg
 
     if yaml_settings:
         _save_settings_yaml(yaml_settings)

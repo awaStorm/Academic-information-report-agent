@@ -2,6 +2,7 @@ import os
 import requests
 import json
 from dotenv import load_dotenv
+from src.utils.config_loader import get_report_title
 
 load_dotenv()
 
@@ -58,7 +59,7 @@ class Pusher:
             print("⚠️ 未配置 WECOM_WEBHOOK，跳过企业微信推送。")
             return False
 
-        header = f"# 📅 西电情报核心提醒 | {date_str}\n"
+        header = f"# 📅 {get_report_title()} | {date_str}\n"
 
         # 1. 将每条情报转为 Markdown 片段，按切片组装
         chunks = []
@@ -72,7 +73,7 @@ class Pusher:
             if len(test_chunk.encode('utf-8')) > self.WECOM_CONTENT_LIMIT and current_chunk != header:
                 # 当前切片已满，开始新切片
                 chunks.append(current_chunk)
-                current_chunk = f"# 📅 西电情报核心提醒 | {date_str} (续)\n"
+                current_chunk = f"# 📅 {get_report_title()} | {date_str} (续)\n"
             current_chunk += item_md
 
         # 别忘了最后一块
@@ -113,7 +114,7 @@ class Pusher:
             print("⚠️ 未配置 SERVERCHAN_SENDKEY，跳过扩展推送。")
             return False
 
-        title = f"西电情报核心提醒 {date_str}"
+        title = f"{get_report_title()} {date_str}"
         
         # 构造简单的正文
         desp = ""

@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { ChevronLeft, ChevronRight, Trophy, Newspaper, ExternalLink } from "lucide-react";
 import { calendarApi, CalendarResponse, CalendarDayData } from "../api/calendar";
+import EventDetailModal, { DetailField, eventToFields, eventToParagraphs } from "../components/common/EventDetailModal";
 
 const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
 
@@ -45,6 +46,23 @@ const CalendarPage: React.FC = () => {
   });
   const [data, setData] = useState<CalendarResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [detail, setDetail] = useState<{ title: string; badge: string; fields: DetailField[]; paragraphs: Array<{ label?: string; text: string }> } | null>(null);
+  // 图例筛选：被隐藏的事件类型（ctf/intel），同时影响日历打点与右侧详情卡片
+  // 持久化到 localStorage：刷新/重开页面后仍保持用户的隐藏选择
+  const HIDDEN_KEY = "calendar_hidden_types";
+  const [hiddenTypes, setHiddenTypes] = useState<Set<"ctf" | "intel">>(() => {
+    try {
+      const raw = localStorage.getItem(HIDDEN_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr.filter((x) => x === "ctf" || x === "intel") : []);
+    } catch { return new Set(); }
+  });
+  const toggleType = (t: "ctf" | "intel") => setHiddenTypes((prev) => {
+    const next = new Set(prev);
+    next.has(t) ? next.delete(t) : next.add(t);
+    try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+    return next;
+  });
 
   const monthStr = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}`;
 
@@ -134,8 +152,8 @@ const CalendarPage: React.FC = () => {
               if (d === null) return <div key={i} className="h-14" />;
               const key = dayKey(d);
               const dayData = data?.days?.[key];
-              const hasCtf = (dayData?.ctf?.length ?? 0) > 0;
-              const hasIntel = (dayData?.intel?.length ?? 0) > 0;
+              const hasCtf = !hiddenTypes.has("ctf") && (dayData?.ctf?.length ?? 0) > 0;
+              const hasIntel = !hiddenTypes.has("intel") && (dayData?.intel?.length ?? 0) > 0;
               const isToday = key === todayStr;
               const isSelected = key === selectedDate;
               return (
@@ -152,8 +170,10 @@ const CalendarPage: React.FC = () => {
                   <div className="flex gap-1 mt-1.5 items-center">
                     {hasCtf && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_4px_rgba(34,211,238,0.6)]" />}
                     {hasIntel && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_4px_rgba(245,158,11,0.6)]" />}
-                    {dayData && (dayData.ctf.length + dayData.intel.length) > 2 && (
-                      <span className="text-[10px] text-gray-500">{dayData.ctf.length + dayData.intel.length}</span>
+                    {dayData && ((hiddenTypes.has("ctf") ? 0 : dayData.ctf.length) + (hiddenTypes.has("intel") ? 0 : dayData.intel.length)) > 2 && (
+                      <span className="text-[10px] text-gray-500">
+                        {(hiddenTypes.has("ctf") ? 0 : dayData.ctf.length) + (hiddenTypes.has("intel") ? 0 : dayData.intel.length)}
+                      </span>
                     )}
                   </div>
                 </button>
@@ -161,10 +181,20 @@ const CalendarPage: React.FC = () => {
             })}
           </div>
 
-          {/* 图例 */}
+          {/* 图例（可点击隐藏对应类型：hover 变红+缩放，隐藏时删除线） */}
           <div className="flex gap-4 mt-4 text-xs text-gray-500">
-            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />CTF 赛事</span>
-            <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />情报推送</span>
+            <button type="button" onClick={() => toggleType("ctf")}
+              className={`flex items-center gap-1.5 transition-all duration-150 hover:text-red-400 hover:scale-105 ${
+                hiddenTypes.has("ctf") ? "text-gray-600" : ""}`}>
+              <span className={`w-1.5 h-1.5 rounded-full bg-cyan-400 ${hiddenTypes.has("ctf") ? "opacity-30" : ""}`} />
+              <span className={hiddenTypes.has("ctf") ? "line-through" : ""}>CTF 赛事</span>
+            </button>
+            <button type="button" onClick={() => toggleType("intel")}
+              className={`flex items-center gap-1.5 transition-all duration-150 hover:text-red-400 hover:scale-105 ${
+                hiddenTypes.has("intel") ? "text-gray-600" : ""}`}>
+              <span className={`w-1.5 h-1.5 rounded-full bg-amber-400 ${hiddenTypes.has("intel") ? "opacity-30" : ""}`} />
+              <span className={hiddenTypes.has("intel") ? "line-through" : ""}>情报推送</span>
+            </button>
           </div>
         </div>
 
@@ -186,13 +216,24 @@ const CalendarPage: React.FC = () => {
             <div className="card text-center text-gray-600 py-12 text-sm">
               当天暂无事件
             </div>
+          ) : hiddenTypes.has("ctf") && hiddenTypes.has("intel") ? (
+            <div className="card text-center text-gray-600 py-12 text-sm">
+              两类事件均已隐藏，点击上方图例恢复显示
+            </div>
           ) : (
             <div className="space-y-4 max-h-[560px] overflow-y-auto pr-2">
               {/* CTF 赛事 */}
-              {selected.ctf.length > 0 && (
+              {!hiddenTypes.has("ctf") && selected.ctf.length > 0 && (
                 <div className="space-y-2">
                   {selected.ctf.map((e) => (
-                    <div key={e.id} className="card !p-4">
+                    <div key={e.id}
+                      onClick={() => setDetail({
+                        title: e.name,
+                        badge: ctfStatusLabel[e.status] || e.status,
+                        fields: eventToFields(e as unknown as Record<string, unknown>),
+                        paragraphs: eventToParagraphs(e as unknown as Record<string, unknown>),
+                      })}
+                      className="card !p-4 cursor-pointer hover:border-cyan-400/40 hover:bg-cyan-400/[0.03] transition-colors">
                       <div className="flex items-center justify-between mb-1.5">
                         <span className="flex items-center gap-1.5 text-sm font-semibold text-white">
                           <Trophy size={14} className="text-cyan-400" />{e.name}
@@ -208,13 +249,13 @@ const CalendarPage: React.FC = () => {
                       </div>
                       <div className="flex gap-2 mt-2">
                         {e.official_url && (
-                          <a href={e.official_url} target="_blank" rel="noreferrer"
+                          <a href={e.official_url} target="_blank" rel="noreferrer" onClick={(ev) => ev.stopPropagation()}
                             className="inline-flex items-center gap-1 text-xs text-accent-light hover:underline">
                             官网 <ExternalLink size={11} />
                           </a>
                         )}
                         {e.ctftime_url && (
-                          <a href={e.ctftime_url} target="_blank" rel="noreferrer"
+                          <a href={e.ctftime_url} target="_blank" rel="noreferrer" onClick={(ev) => ev.stopPropagation()}
                             className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-accent-light transition-colors">
                             CTFtime <ExternalLink size={11} />
                           </a>
@@ -226,10 +267,17 @@ const CalendarPage: React.FC = () => {
               )}
 
               {/* 情报推送 */}
-              {selected.intel.length > 0 && (
+              {!hiddenTypes.has("intel") && selected.intel.length > 0 && (
                 <div className="space-y-2">
                   {selected.intel.map((item, idx) => (
-                    <div key={idx} className="card !p-4">
+                    <div key={idx}
+                      onClick={() => setDetail({
+                        title: item.title,
+                        badge: item.category,
+                        fields: eventToFields(item as unknown as Record<string, unknown>),
+                        paragraphs: eventToParagraphs(item as unknown as Record<string, unknown>),
+                      })}
+                      className="card !p-4 cursor-pointer hover:border-amber-400/40 hover:bg-amber-400/[0.03] transition-colors">
                       <div className="flex items-center justify-between mb-1.5">
                         <span className="flex items-center gap-1.5 text-sm font-semibold text-white">
                           <Newspaper size={14} className="text-amber-400" />{item.title}
@@ -265,14 +313,12 @@ const CalendarPage: React.FC = () => {
                               return (
                                 <React.Fragment key={ni}>
                                   {canJump ? (
-                                    <button type="button" onClick={() => goToDate(nodeDate)}
-                                      title={`跳转到 ${nodeDate}`}
+                                    <button type="button" onClick={(ev) => { ev.stopPropagation(); goToDate(nodeDate); }}
                                       className={`${chipCls} hover:bg-amber-400/25 hover:border-amber-400/60 cursor-pointer transition-colors`}>
                                       {chipText}
                                     </button>
                                   ) : (
-                                    <span className={chipCls}
-                                      title={node.time ? `${node.date ?? ""} ${node.time}` : node.date}>
+                                    <span className={chipCls}>
                                       {chipText}
                                     </span>
                                   )}
@@ -288,7 +334,7 @@ const CalendarPage: React.FC = () => {
                       {item.links && item.links.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 mt-2">
                           {item.links.slice(0, 5).map((l, li) => (
-                            <a key={li} href={l} target="_blank" rel="noreferrer" title={l}
+                            <a key={li} href={l} target="_blank" rel="noreferrer" title={l} onClick={(ev) => ev.stopPropagation()}
                               className="text-xs px-2 py-0.5 rounded text-accent-light bg-accent-primary/10 border border-accent-primary/30 hover:bg-accent-primary/20 transition-colors max-w-[220px] truncate">
                               🔗 {li === 0 ? "原文" : `引用${li}`}
                             </a>
@@ -306,6 +352,10 @@ const CalendarPage: React.FC = () => {
           )}
         </div>
       </div>
+      {detail && (
+        <EventDetailModal title={detail.title} badge={detail.badge}
+          fields={detail.fields} paragraphs={detail.paragraphs} onClose={() => setDetail(null)} />
+      )}
     </div>
   );
 };

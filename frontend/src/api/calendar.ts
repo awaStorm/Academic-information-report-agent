@@ -12,6 +12,8 @@ export interface CalendarCtfEvent {
   format?: string;
   location?: string;
   weight?: number;
+  date?: string;
+  notes?: string;
   start_time?: string | null;
   end_time?: string | null;
 }

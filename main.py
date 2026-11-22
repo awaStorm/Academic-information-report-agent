@@ -22,7 +22,8 @@ load_dotenv()
 
 def main():
     print(f"==========================================")
-    print(f"🚀 西电校园情报 Agent 启动 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    from src.utils.config_loader import get_display_name
+    print(f"🚀 {get_display_name()} 启动 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"==========================================")
 
     # --- 第一阶段：原始情报抓取 (Raw Data) ---
@@ -34,6 +35,10 @@ def main():
         Scraper().fetch_and_save()
         print("👉 正在启动微信公众号抓取...")
         WechatScraper().run_scraper_flow()
+        print("👉 正在按检查清单扫描通用网站信源...")
+        from src.collectors.scrapers.generic_scraper import run_generic_scraper
+        generic = run_generic_scraper()
+        print(f"   通用信源: {generic.get('message', '无')}")
     except Exception as e:
         print(f"❌ 采集阶段发生致命错误: {e}")
         return

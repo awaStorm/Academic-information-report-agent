@@ -5,7 +5,7 @@ from datetime import datetime
 
 # 导入修正后的工具配置
 from tools_config import TOOLS_METADATA, execute_tool
-from src.utils.config_loader import CONFIG
+from src.utils.config_loader import CONFIG, get_identity_prompt, get_display_name
 from src.utils.llm_client import build_llm_client, call_with_retry
 
 load_dotenv()
@@ -40,7 +40,7 @@ class XidianAgent:
         self.system_prompt = {
             "role": "system",
             "content": (
-                "你是西安电子科技大学的【校园情报 Agent】。\n"
+                get_identity_prompt() + "\n"
                 "你有权访问超星通知、微信公众号数据、本地数据库以及推送工具。\n\n"
                 "## 执行准则\n"
                 "1. 链路逻辑：采集 -> 处理 -> 解析 -> 合流 -> 分析 -> 推送。\n"
@@ -50,6 +50,7 @@ class XidianAgent:
                 "5. 结束意图：当用户表达再见或任务完成时，请礼貌告别并在回复中包含'再见'或'退出'。\n"
                 "6. 尊重用户的显式指令：如果用户明确要求「扫码登录」「重试」「再抓一次」，即使你判断可能无效，也必须照办——可以先说明你的判断，但不得替用户拒绝，更不得以'这样做没用'为由不执行。\n"
                 "7. 回复简洁：先给结论与关键事实（失败数量、error_type、错误码等可核验信息），再给必要说明；同一个结论只讲一次，不反复论证、不长篇铺垫。\n"
+                "8. 信源扩展：当用户要求适配不同学校、寻找特定竞赛/通知渠道、或自定义信源时，用 discover_source_cards 生成候选卡片（网站大卡片+公众号小卡片），用 list_source_cards 查看，用 add_card_to_checklist 加入检查清单，用 remove_card 删除。信源不局限于超星/微信预设；网站卡片会在生成时做可达性验证，未验证的如实告知用户由其决定。生成后不要擅自把所有卡片都加入清单，先让用户确认。\n"
                 "## 故障排除指引\n"
                 "1. run_wechat_scraper 的返回值必须按 error_type 区分，严禁把抓取失败当成'没有新情报'：\n"
                 "   - success=true 且 count>0：正常取到文章。\n"
@@ -166,7 +167,7 @@ class XidianAgent:
 if __name__ == "__main__":
     agent = XidianAgent()
     print("========================================")
-    print("🎓 西电校园情报 Agent 启动成功！")
+    print(f"🎓 {get_display_name()} 启动成功！")
     print("提示：输入'退出'结束对话。")
     print("========================================")
     

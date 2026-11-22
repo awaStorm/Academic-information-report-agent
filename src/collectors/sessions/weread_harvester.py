@@ -38,6 +38,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
+from src.utils.config_loader import get_probe_query
+
 
 class WereadHarvester:
     """微信读书凭证采集器 / 静默续期器"""
@@ -85,8 +87,9 @@ class WereadHarvester:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
     )
-    # 验证登录态用的中性检索词：只要回执含 content 段即说明登录有效
-    PROBE_QUERY = "西电"
+    # 验证登录态用的检索词兜底：实际取值由 profile.probe_query / school_name 决定，
+    # 只要回执含 content 段即说明登录有效。
+    PROBE_QUERY = "大学"
     # 等待人工扫码的上限（秒）。扫码本身可能很慢，给足 10 分钟，避免中途失败。
     LOGIN_WAIT_SECONDS = 600
 
@@ -94,6 +97,7 @@ class WereadHarvester:
         self.wait_seconds = int(wait_seconds or self.LOGIN_WAIT_SECONDS)
         # 人工扫码必须可见浏览器，默认有头；静默续期会显式改用无头
         self.headless = headless
+        self.probe_query = get_probe_query()
 
     # ---------- 内部工具 ----------
     @staticmethod
@@ -591,7 +595,7 @@ class WereadHarvester:
           }
         }
         """
-        payload = {"query": self.PROBE_QUERY, "offset": 0, "searchcookies": "", "searchid": ""}
+        payload = {"query": getattr(self, "probe_query", self.PROBE_QUERY), "offset": 0, "searchcookies": "", "searchid": ""}
         try:
             res = page.evaluate(js, {"url": self.BROKER_URL, "payload": payload})
         except Exception as e:

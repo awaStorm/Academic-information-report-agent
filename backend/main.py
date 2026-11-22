@@ -8,6 +8,16 @@ import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+# 后台 uvicorn 未走 start.bat 的 chcp 65001，控制台默认 GBK：
+# 采集器/分析器里大量 emoji + 中文 print 会在 Agent 线程池调用时抛
+# "'gbk' codec can't encode character"，导致采集工具整体失败。
+# 在入口处一次性把 stdout/stderr 重配为 UTF-8，覆盖所有模块的 print。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 # 将项目根目录加入 sys.path，使 backend 能导入 src/
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -18,10 +28,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from backend.api.v1 import agents, config_api as config_router, dashboard_api as dashboard, reports_api as reports, preferences_api as preferences, ctf as ctf_router, calendar_api as calendar
+from backend.api.v1 import agents, config_api as config_router, dashboard_api as dashboard, reports_api as reports, preferences_api as preferences, ctf as ctf_router, calendar_api as calendar, source_cards_api as source_cards
 from backend.ws.connection_manager import manager as ws_manager
 from backend.core.agent_registry import registry
 from backend.services.scheduler_service import SchedulerService
+from src.utils.config_loader import get_display_name
 
 # 导入 agents 模块，触发 Agent 自动注册
 import backend.agents  # noqa: F401
@@ -40,7 +51,7 @@ scheduler_service = SchedulerService()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    logger.info("🚀 西电校园情报助手后端启动中...")
+    logger.info(f"🚀 {get_display_name()}后端启动中...")
     # 启动自检：微信读书扫码环境（持久化档案 vs Playwright 自带 Chromium）版本一致性。
     # 只读、不启动浏览器、不修改任何文件；错配时提前告警，避免等到用户要扫码时才失败，
     # 又因 Playwright 只报 "Target page, context or browser has been closed" 而误判成
@@ -54,6 +65,17 @@ async def lifespan(app: FastAPI):
             logger.info("✅ 微信读书扫码环境自检: %s", env.get("message"))
     except Exception as e:  # 自检绝不能影响后端启动
         logger.warning("微信读书扫码环境自检跳过（%s）", e)
+    # 启动时：确保超星/微信两张系统内置信源卡片存在并排在检查清单最前
+    try:
+        from src.utils.source_store import ensure_system_cards, migrate_targets_to_cards
+        n = ensure_system_cards()
+        if n:
+            logger.info(f"✅ 已初始化 {n} 张系统内置信源卡片（超星/微信）")
+        m = migrate_targets_to_cards()
+        if m:
+            logger.info(f"✅ 已将 {m} 个历史微信公众号目标迁移为信源卡片")
+    except Exception as e:
+        logger.warning(f"信源卡片初始化/迁移失败（不影响原有采集）: {e}")
     # 启动时：初始化调度器
     scheduler_service.start()
     yield
@@ -63,7 +85,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="西电校园情报助手 API",
+    title=f"{get_display_name()} API",
     description="校园情报采集、分析与推送系统后端",
     version="2.0.0",
     lifespan=lifespan,
@@ -92,6 +114,7 @@ app.include_router(reports.router, prefix="/api/v1/reports", tags=["报告管理
 app.include_router(preferences.router, prefix="/api/v1/preferences", tags=["偏好设置"])
 app.include_router(ctf_router.router, prefix="/api/v1/ctf", tags=["CTF时间表"])
 app.include_router(calendar.router, prefix="/api/v1/calendar", tags=["事件日历"])
+app.include_router(source_cards.router, prefix="/api/v1/source-cards", tags=["信源卡片"])
 
 
 # WebSocket 路由：实时日志流
@@ -101,11 +124,16 @@ async def websocket_logs(websocket: WebSocket, session_id: str = "default"):
     await ws_manager.connect(websocket, session_id)
     try:
         while True:
-            # 接收前端消息（如中断请求）
+            # 接收前端消息（中断 / 心跳 / 清历史）
             data = await websocket.receive_json()
-            if data.get("type") == "interrupt":
+            msg_type = data.get("type")
+            if msg_type == "interrupt":
                 logger.info(f"收到中断请求: {session_id}")
                 ws_manager.mark_interrupt(session_id)
+            elif msg_type == "ping":
+                await websocket.send_json({"type": "pong", "ts": data.get("ts")})
+            elif msg_type == "clear_history":
+                ws_manager.clear_history(session_id)
     except WebSocketDisconnect:
         logger.info(f"WebSocket 断开: {session_id}")
     finally:
@@ -116,7 +144,7 @@ async def websocket_logs(websocket: WebSocket, session_id: str = "default"):
 @app.get("/")
 async def root():
     return {
-        "name": "西电校园情报助手",
+        "name": get_display_name(),
         "version": "2.0.0",
         "docs": "/docs",
         "status": "running",

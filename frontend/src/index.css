@@ -2,6 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes toastOut {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(20px); }
+}
+
+/* 弹窗遮罩淡入 + 内容轻微上浮放大，统一给所有 Modal / Notice 使用 */
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 列表条目依次浮现（信源仓库 / 清单 / 事件卡） */
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 尊重系统"减少动态效果"偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .animate-overlay-in, .animate-modal-in, .animate-rise-in {
+    animation: none !important;
+  }
+}
+
 @layer base {
   body {
     background-color: #0a0a0f;
@@ -65,4 +97,10 @@
     background-color: #18181b;
     color: #e4e4e7;
   }
+
+  /* 统一弹窗过渡：遮罩淡入 + 面板上浮放大 */
+  .animate-overlay-in { animation: overlayIn 180ms ease-out both; }
+  .animate-modal-in { animation: modalIn 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  /* 列表项浮现 */
+  .animate-rise-in { animation: riseIn 280ms ease-out both; }
 }

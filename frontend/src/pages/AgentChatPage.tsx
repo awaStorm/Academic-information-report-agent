@@ -21,11 +21,13 @@ const AgentChatPage: React.FC = () => {
   // 订阅全局 WS：新日志 / 连接状态（幂等连接，已连接时跳过）
   useEffect(() => {
     wsManager.connect(sessionId);
-    const offLog = wsManager.onLog((entry) => setLogs((prev) => [...prev, entry]));
+    // 以管理器 buffer 为唯一数据源：重连回放后全量刷新，天然去重
+    const offBuffer = wsManager.onBufferChange(() => setLogs(wsManager.getBuffer()));
     const offConn = wsManager.onConnectionChange(setConnected);
     setConnected(wsManager.isConnected);
+    setLogs(wsManager.getBuffer());
     return () => {
-      offLog();
+      offBuffer();
       offConn();
     };
   }, [sessionId]);
@@ -38,7 +40,7 @@ const AgentChatPage: React.FC = () => {
   }, [logs]);
 
   const appendLog = (cls: string, html: string) => {
-    setLogs(prev => [...prev, { cls, html }]);
+    wsManager.appendLocal({ cls, html });
   };
 
   const sendMessage = useCallback(() => {
@@ -56,16 +58,13 @@ const AgentChatPage: React.FC = () => {
       .then((data) => {
         // 降级：如果 WebSocket 日志未到达，直接用 REST 响应展示
         if (data.success && data.response) {
-          // 用短延迟确保 WebSocket 消息先到达；如果 1s 后还没收到，则降级展示
+          // 用短延迟确保 WebSocket 消息先到达；如果 1.5s 后还没收到，则降级展示
           setTimeout(() => {
-            setLogs(prev => {
-              const hasAgentReply = prev.some(l => l.cls === "agent");
-              if (!hasAgentReply) {
-                return [...prev, { cls: "agent", html: `🤖 ${data.response}` }];
-              }
-              return prev;
-            });
-          }, 1000);
+            const hasAgentReply = wsManager.getBuffer().some(l => l.cls === "agent");
+            if (!hasAgentReply) {
+              wsManager.appendLocal({ cls: "agent", html: `🤖 ${data.response}` });
+            }
+          }, 1500);
         }
         if (!data.success) {
           appendLog("err", `❌ ${data.message || "请求失败"}`);

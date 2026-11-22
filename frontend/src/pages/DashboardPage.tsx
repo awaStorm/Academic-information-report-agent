@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from "react";
 import { RefreshCw } from "lucide-react";
 import { dashboardApi, DashboardRecord, DashboardStats } from "../api/dashboard";
+import EventDetailModal, { DetailField, eventToFields, eventToParagraphs } from "../components/common/EventDetailModal";
 
 const categoryColors: Record<string, string> = {
   "讲座活动": "text-purple-400 bg-purple-400/10",
@@ -27,6 +28,7 @@ const DashboardPage: React.FC = () => {
   const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [platform, setPlatform] = useState("all");
   const [loading, setLoading] = useState(false);
+  const [detail, setDetail] = useState<{ title: string; badge: string; fields: DetailField[]; paragraphs: Array<{ label?: string; text: string }> } | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -106,7 +108,14 @@ const DashboardPage: React.FC = () => {
           <div className="text-center text-gray-600 py-10">暂无推送记录</div>
         ) : (
           records.map((record, idx) => (
-            <div key={idx} className="card !p-4">
+            <div key={idx}
+              onClick={() => setDetail({
+                title: record.title,
+                badge: record.category,
+                fields: eventToFields(record as unknown as Record<string, unknown>),
+                paragraphs: eventToParagraphs(record as unknown as Record<string, unknown>),
+              })}
+              className="card !p-4 cursor-pointer hover:border-violet-400/40 hover:bg-violet-400/[0.03] transition-colors">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-semibold text-white">{record.title}</span>
                 <span className="text-xs text-gray-500">{record.push_time}</span>
@@ -136,8 +145,7 @@ const DashboardPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-1">
                     {record.timeline.filter((node) => node && typeof node === "object").map((node, ni, arr) => (
                       <React.Fragment key={ni}>
-                        <span className="text-xs px-2 py-0.5 rounded bg-amber-400/10 text-amber-300 border border-amber-400/30"
-                          title={node.time ? `${node.date ?? ""} ${node.time}` : node.date}>
+                        <span className="text-xs px-2 py-0.5 rounded bg-amber-400/10 text-amber-300 border border-amber-400/30">
                           {node.label} {node.date?.slice(5)}
                           {node.time ? ` ${node.time}` : ""}
                         </span>
@@ -153,7 +161,7 @@ const DashboardPage: React.FC = () => {
               {record.links && record.links.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {record.links.slice(0, 5).map((l, li) => (
-                    <a key={li} href={l} target="_blank" rel="noreferrer"
+                    <a key={li} href={l} target="_blank" rel="noreferrer" onClick={(ev) => ev.stopPropagation()}
                       title={l}
                       className="text-xs px-2 py-0.5 rounded text-accent-light bg-accent-primary/10 border border-accent-primary/30 hover:bg-accent-primary/20 transition-colors max-w-[220px] truncate">
                       🔗 {li === 0 ? "原文" : `引用${li}`}
@@ -168,6 +176,10 @@ const DashboardPage: React.FC = () => {
           ))
         )}
       </div>
+      {detail && (
+        <EventDetailModal title={detail.title} badge={detail.badge}
+          fields={detail.fields} paragraphs={detail.paragraphs} onClose={() => setDetail(null)} />
+      )}
     </div>
   );
 };
