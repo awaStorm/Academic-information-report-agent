@@ -4,6 +4,20 @@
 
 ---
 
+## [2026-11-22] v2.6.0 Changed：统一全项目版本标识至 v2.6.0（与 changelog / GitHub Release 对齐）
+
+### Changed
+- 用户反馈「Release 是 2.6、README 是 2.4」版本不一致。以本变更日志的最新版本 v2.6.0 为准，统一全项目当前版本标识。
+- `README.md`：标题 `v2.4`→`v2.6`，补 v2.5.0 / v2.6.0 发布横幅。
+- `RELEASE_NOTES.md`：补 v2.6.0 / v2.5.0 章节（与刚发布的 GitHub Release v2.6.0 说明对齐）。
+- `backend/main.py`：FastAPI `version` 由 `2.0.0` 改为 `2.6.0`（OpenAPI 文档版本号）。
+- 同步提交并推送到 GitHub main。
+
+### 验证
+- 全项目版本号检索：`README.md`/`RELEASE_NOTES.md`/`backend/main.py` 的当前版本均为 2.6；历史版本横幅/章节按发布记录保留。`py_compile` 通过。
+
+---
+
 ## [2026-11-21] v2.6.0 Fixed：WebSocket 断线丢消息 + 日历筛选不持久化
 
 ### 根因澄清

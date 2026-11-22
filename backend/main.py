@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=f"{get_display_name()} API",
     description="校园情报采集、分析与推送系统后端",
-    version="2.0.0",
+    version="2.6.0",
     lifespan=lifespan,
 )
 
